@@ -271,8 +271,9 @@ body {
 
 .elixir-badge {
   position: absolute;
-  left: 14px;
-  bottom: 8px;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
   width: 52px;
   height: 60px;
   display: flex;
