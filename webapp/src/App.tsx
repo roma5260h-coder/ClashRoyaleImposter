@@ -568,7 +568,7 @@ export default function App() {
       {screen === "room" && roomInfo && (
         <div className="card center">
           <div className="title">
-            Код комнаты <span className="room-code">{roomInfo.room_code}</span>
+            Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
           </div>
           <p className="text">Игроков: {roomInfo.player_count}</p>
           <div className="players">
