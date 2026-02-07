@@ -243,6 +243,11 @@ body {
   font-weight: 600;
 }
 
+.room-code {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .card-image-wrapper {
   position: relative;
 }

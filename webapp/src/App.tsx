@@ -567,7 +567,9 @@ export default function App() {
 
       {screen === "room" && roomInfo && (
         <div className="card center">
-          <div className="title">Комната {roomInfo.room_code}</div>
+          <div className="title">
+            Комната <span className="room-code">{roomInfo.room_code}</span>
+          </div>
           <p className="text">Игроков: {roomInfo.player_count}</p>
           <div className="players">
             {roomInfo.players.map((p) => (
