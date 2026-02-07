@@ -36,14 +36,14 @@ export default function App() {
 
   const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<number>(1);
-  const [offlineRole, setOfflineRole] = useState<{ role: string; card?: string; image_url?: string } | null>(null);
+  const [offlineRole, setOfflineRole] = useState<{ role: string; card?: string; image_url?: string; elixir_cost?: number | null } | null>(null);
   const [offlineImageOk, setOfflineImageOk] = useState<boolean>(true);
   const [starterPlayer, setStarterPlayer] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState<string>("");
-  const [roomRole, setRoomRole] = useState<{ role: string; card?: string; image_url?: string } | null>(null);
+  const [roomRole, setRoomRole] = useState<{ role: string; card?: string; image_url?: string; elixir_cost?: number | null } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
 
@@ -180,7 +180,7 @@ export default function App() {
     try {
       const res = await api.offlineReveal(apiConfig, offlineSessionId);
       console.debug("offline role payload", res);
-      setOfflineRole({ role: res.role, card: res.card, image_url: res.image_url });
+      setOfflineRole({ role: res.role, card: res.card, image_url: res.image_url, elixir_cost: res.elixir_cost });
       setScreen("offlineRole");
     } catch (err: any) {
       setError(err.message || "Не удалось показать роль");
@@ -307,7 +307,7 @@ export default function App() {
     try {
       const res = await api.roomRole(apiConfig, roomInfo.room_code);
       console.debug("room role payload", res);
-      setRoomRole({ role: res.role, card: res.card, image_url: res.image_url });
+      setRoomRole({ role: res.role, card: res.card, image_url: res.image_url, elixir_cost: res.elixir_cost });
       setScreen("roomRole");
     } catch (err: any) {
       setError(err.message || "Не удалось получить роль");
@@ -489,12 +489,20 @@ export default function App() {
             </div>
           )}
           {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
-            <img
-              className="card-image"
-              src={resolveImageUrl(offlineRole.image_url)}
-              alt="Карта"
-              onError={() => setOfflineImageOk(false)}
-            />
+            <div className="card-image-wrapper">
+              <img
+                className="card-image"
+                src={resolveImageUrl(offlineRole.image_url)}
+                alt="Карта"
+                onError={() => setOfflineImageOk(false)}
+              />
+              {typeof offlineRole.elixir_cost === "number" && (
+                <div className="elixir-badge" aria-label={`Эликсир ${offlineRole.elixir_cost}`}>
+                  <img src="/assets/elik.png" alt="Эликсир" />
+                  <span>{offlineRole.elixir_cost}</span>
+                </div>
+              )}
+            </div>
           )}
           {offlineRole.role === "card" && offlineRole.image_url && !offlineImageOk && (
             <div className="hint">Изображение недоступно</div>
@@ -603,12 +611,20 @@ export default function App() {
             </div>
           )}
           {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
-            <img
-              className="card-image"
-              src={resolveImageUrl(roomRole.image_url)}
-              alt="Карта"
-              onError={() => setRoomImageOk(false)}
-            />
+            <div className="card-image-wrapper">
+              <img
+                className="card-image"
+                src={resolveImageUrl(roomRole.image_url)}
+                alt="Карта"
+                onError={() => setRoomImageOk(false)}
+              />
+              {typeof roomRole.elixir_cost === "number" && (
+                <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
+                  <img src="/assets/elik.png" alt="Эликсир" />
+                  <span>{roomRole.elixir_cost}</span>
+                </div>
+              )}
+            </div>
           )}
           {roomRole.role === "card" && roomRole.image_url && !roomImageOk && (
             <div className="hint">Изображение недоступно</div>

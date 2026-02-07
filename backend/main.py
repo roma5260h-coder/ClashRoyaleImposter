@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from .game_logic import deal_roles
 from .data.card_images import get_card_image
+from .data.elixir_costs import get_elixir_cost
 
 
 load_dotenv()
@@ -80,6 +81,7 @@ class OfflineRevealResponse(BaseModel):
     role: str
     card: Optional[str] = None
     image_url: Optional[str] = None
+    elixir_cost: Optional[int] = None
 
 
 class OfflineCloseRequest(BaseRequest):
@@ -147,6 +149,7 @@ class RoomRoleResponse(BaseModel):
     role: str
     card: Optional[str] = None
     image_url: Optional[str] = None
+    elixir_cost: Optional[int] = None
 
 
 @dataclass
@@ -376,6 +379,7 @@ async def offline_reveal(request: OfflineRevealRequest) -> OfflineRevealResponse
             role="card",
             card=card,
             image_url=image_url,
+            elixir_cost=get_elixir_cost(card),
         )
     return OfflineRevealResponse(
         player_number=player_number,
@@ -581,7 +585,7 @@ async def room_role(request: RoomActionRequest) -> RoomRoleResponse:
     card = room.cards_by_user.get(user_id)
     if card:
         image_url = build_image_proxy_url(card)
-        return RoomRoleResponse(role="card", card=card, image_url=image_url)
+        return RoomRoleResponse(role="card", card=card, image_url=image_url, elixir_cost=get_elixir_cost(card))
     return RoomRoleResponse(role="spy", card=None)
 
 

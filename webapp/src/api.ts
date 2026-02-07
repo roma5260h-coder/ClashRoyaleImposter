@@ -47,7 +47,7 @@ export const api = {
     ),
 
   offlineReveal: (config: ApiConfig, sessionId: string) =>
-    post<{ player_number: number; role: "spy" | "card"; card?: string; image_url?: string }>(
+    post<{ player_number: number; role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(
       config,
       "/api/offline/reveal",
       { session_id: sessionId }
@@ -97,7 +97,7 @@ export const api = {
     ),
 
   roomRole: (config: ApiConfig, roomCode: string) =>
-    post<{ role: "spy" | "card"; card?: string; image_url?: string }>(
+    post<{ role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(
       config,
       "/api/room/role",
       { room_code: roomCode }

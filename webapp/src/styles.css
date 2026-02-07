@@ -243,6 +243,10 @@ body {
   font-weight: 600;
 }
 
+.card-image-wrapper {
+  position: relative;
+}
+
 .card-image {
   width: 100%;
   max-height: 220px;
@@ -263,6 +267,36 @@ body {
   width: 60%;
   height: 60%;
   object-fit: contain;
+}
+
+.elixir-badge {
+  position: absolute;
+  left: 14px;
+  bottom: 8px;
+  width: 52px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.elixir-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35));
+}
+
+.elixir-badge span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  font-weight: 800;
+  font-size: 18px;
+  color: #ffffff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
 }
 
 
