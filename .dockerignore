@@ -1,0 +1,12 @@
+.git
+.venv
+backend/.venv
+bot/.venv
+webapp/node_modules
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.env
+webapp/dist

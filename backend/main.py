@@ -12,6 +12,8 @@ from urllib.parse import parse_qsl, quote
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -687,3 +689,8 @@ def random_choice(items: List[int]) -> int:
 def log_random(event: str, players: List[int], spies: List[int]) -> None:
     if DEBUG_RANDOM:
         print(f"[RANDOM] {event} players={players} spies={spies}")
+
+
+WEBAPP_DIST = Path(__file__).resolve().parent / "webapp_dist"
+if WEBAPP_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(WEBAPP_DIST), html=True), name="webapp")
