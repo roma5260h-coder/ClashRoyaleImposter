@@ -1,0 +1,4 @@
+Put the UI images here and name them:
+- osnovBanner.png (main screen background)
+- cardBan.png (game/lobby background)
+- spy1.png (spy role image)
