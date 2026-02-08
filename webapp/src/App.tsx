@@ -409,6 +409,15 @@ export default function App() {
       : 0;
   const timerSecondsLeft = turnRemainingMs === null ? null : Math.max(0, Math.ceil(turnRemainingMs / 1000));
   const starterDisplayName = roomInfo?.starter_name ?? roomStarter?.replace("Игру начинает: ", "") ?? null;
+  const roomTurnLoopVisible = Boolean(
+    roomInfo?.timer_enabled &&
+      (roomInfo.turn_state === "turn_loop_active" || roomInfo.state === "paused")
+  );
+  const roomTurnAwaitingStart = Boolean(
+    roomInfo?.timer_enabled &&
+      roomInfo.turn_state === "ready_to_start" &&
+      roomInfo.state === "started"
+  );
 
   const clearSessionData = () => {
     leaveSentRef.current = false;
@@ -1344,12 +1353,22 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                <div className="lobby-counter">
+                  {roomInfo.player_count} / {roomInfo.player_limit ?? MAX_PLAYERS}
+                </div>
 
                 <div className="turn-board">
-                  <div className="text">Начинает: {starterDisplayName ?? "—"}</div>
-                  <div className="text">
-                    Сейчас ход: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
-                  </div>
+                  {roomTurnLoopVisible && (
+                    <>
+                      <div className="text">Начинает: {starterDisplayName ?? "—"}</div>
+                      <div className="text">
+                        Сейчас ход: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
+                      </div>
+                    </>
+                  )}
+                  {roomTurnAwaitingStart && (
+                    <div className="text">Нажмите «Запустить ходы», чтобы начать игру с таймером.</div>
+                  )}
 
                   {roomInfo.timer_enabled && roomInfo.turn_state === "turn_loop_active" && roomInfo.state === "started" && renderTurnProgress()}
 
@@ -1363,7 +1382,7 @@ export default function App() {
 
                 <div className="actions stack">
                   <button className="btn" onClick={handleGetRole}>
-                    Показать мою роль
+                    Показать карту
                   </button>
 
                   {roomInfo.timer_enabled &&
@@ -1371,7 +1390,7 @@ export default function App() {
                     roomInfo.state === "started" &&
                     roomInfo.you_are_owner && (
                       <button className="btn" onClick={handleStartRoomTurn}>
-                        Начать игру
+                        Запустить ходы
                       </button>
                     )}
 
