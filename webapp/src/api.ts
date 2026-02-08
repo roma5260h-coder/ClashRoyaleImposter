@@ -140,6 +140,15 @@ export const api = {
   roomTurnFinish: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/turn/finish", { room_code: roomCode }),
 
+  roomResume: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/resume", { room_code: roomCode }),
+
+  roomHeartbeat: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/heartbeat", { room_code: roomCode }),
+
+  roomLeave: (config: ApiConfig, roomCode: string) =>
+    post<{ left: boolean; room_closed: boolean }>(config, "/api/room/leave", { room_code: roomCode }),
+
   roomRole: (config: ApiConfig, roomCode: string) =>
     post<{ role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(
       config,

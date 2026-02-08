@@ -439,6 +439,26 @@ body {
   padding: 12px;
 }
 
+.room-game-card {
+  min-height: 72vh;
+}
+
+.leave-link {
+  margin-top: auto;
+  align-self: center;
+  border: none;
+  background: transparent;
+  color: #ff6b6b;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 10px 4px 0;
+}
+
+.leave-link:hover {
+  text-decoration: underline;
+}
+
 
 .hint {
   color: var(--muted);

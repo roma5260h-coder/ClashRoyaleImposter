@@ -6,12 +6,13 @@ export type RoomInfo = {
   room_code: string;
   owner_user_id: number;
   owner_name: string;
+  host_name: string;
   format_mode: GameFormat;
   play_mode: GameMode;
   players: { user_id: number; first_name?: string | null; last_name?: string | null; display_name: string }[];
   player_count: number;
   player_limit?: number;
-  state: "waiting" | "started" | "finished";
+  state: "waiting" | "started" | "paused" | "finished";
   can_start: boolean;
   you_are_owner: boolean;
   starter_name?: string | null;
@@ -23,4 +24,5 @@ export type RoomInfo = {
   current_turn_name?: string | null;
   turn_started_at?: number | null;
   turns_completed?: boolean;
+  status_message?: string | null;
 };

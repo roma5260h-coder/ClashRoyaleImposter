@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiConfig } from "./api";
 import type { GameFormat, GameMode, RoomInfo, TurnState } from "./types";
 
@@ -19,6 +19,7 @@ type Screen =
   | "offlineTurn"
   | "joinRoom"
   | "room"
+  | "roomGame"
   | "roomRole";
 
 type OfflineTurnStatus = {
@@ -88,6 +89,7 @@ export default function App() {
   } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
+  const leaveSentRef = useRef<boolean>(false);
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
 
@@ -153,7 +155,7 @@ export default function App() {
   }, [timerEnabled]);
 
   useEffect(() => {
-    if (screen !== "room" || !roomInfo) return;
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
 
     let canceled = false;
     const poll = async () => {
@@ -161,9 +163,12 @@ export default function App() {
         const info = await api.roomStatus(apiConfig, roomInfo.room_code);
         if (canceled) return;
         setRoomInfo(info);
-        if (info.state === "started") {
+        if (info.state === "started" || info.state === "paused") {
           const starter = info.starter_name ? `Игру начинает: ${info.starter_name}` : "Игра началась";
           setRoomStarter((prev) => prev ?? starter);
+        }
+        if (screen === "room" && (info.state === "started" || info.state === "paused")) {
+          setScreen("roomGame");
         }
       } catch {
         // ignore transient polling errors
@@ -177,6 +182,97 @@ export default function App() {
       clearInterval(interval);
     };
   }, [apiConfig, roomInfo?.room_code, screen]);
+
+  useEffect(() => {
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
+
+    let canceled = false;
+    const ping = async () => {
+      try {
+        const info = await api.roomHeartbeat(apiConfig, roomInfo.room_code);
+        if (canceled) return;
+        setRoomInfo(info);
+        if (screen === "room" && (info.state === "started" || info.state === "paused")) {
+          setScreen("roomGame");
+        }
+      } catch {
+        // ignore transient heartbeat errors
+      }
+    };
+
+    ping();
+    const interval = setInterval(ping, 8000);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+    };
+  }, [apiConfig, roomInfo?.room_code, screen]);
+
+  useEffect(() => {
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
+
+    leaveSentRef.current = false;
+    const endpoint = apiBase ? `${apiBase.replace(/\/$/, "")}/api/room/leave` : "/api/room/leave";
+    const payload = JSON.stringify({ initData, room_code: roomInfo.room_code });
+    const sendLeaveSignal = () => {
+      if (leaveSentRef.current) return;
+      leaveSentRef.current = true;
+
+      let delivered = false;
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: "application/json" });
+          delivered = navigator.sendBeacon(endpoint, blob);
+        }
+      } catch {
+        delivered = false;
+      }
+
+      if (!delivered) {
+        fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(() => undefined);
+      }
+    };
+
+    let hiddenTimer: number | null = null;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (hiddenTimer !== null) {
+          window.clearTimeout(hiddenTimer);
+        }
+        hiddenTimer = window.setTimeout(() => {
+          if (document.visibilityState === "hidden") {
+            sendLeaveSignal();
+          }
+        }, 15000);
+        return;
+      }
+      if (hiddenTimer !== null) {
+        window.clearTimeout(hiddenTimer);
+        hiddenTimer = null;
+      }
+    };
+    const onPageHide = () => sendLeaveSignal();
+    const onBeforeUnload = () => sendLeaveSignal();
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      if (hiddenTimer !== null) {
+        window.clearTimeout(hiddenTimer);
+      }
+      leaveSentRef.current = false;
+    };
+  }, [apiBase, initData, roomInfo?.room_code, screen]);
 
   useEffect(() => {
     if (screen !== "offlineTurn" || !offlineSessionId || !offlineTimerEnabled || offlineTurn?.turn_state === "finished") {
@@ -228,7 +324,7 @@ export default function App() {
     }
 
     if (
-      screen === "room" &&
+      screen === "roomGame" &&
       roomInfo?.state === "started" &&
       roomInfo.timer_enabled &&
       roomInfo.turn_state === "turn_loop_active" &&
@@ -276,8 +372,10 @@ export default function App() {
       ? Math.max(0, Math.min(100, ((turnRemainingMs ?? 0) / timerTotalMs) * 100))
       : 0;
   const timerSecondsLeft = turnRemainingMs === null ? null : Math.max(0, Math.ceil(turnRemainingMs / 1000));
+  const starterDisplayName = roomInfo?.starter_name ?? roomStarter?.replace("Игру начинает: ", "") ?? null;
 
   const clearSessionData = () => {
+    leaveSentRef.current = false;
     setPendingOfflineCount(null);
     setOfflineSessionId(null);
     setOfflineTimerEnabled(false);
@@ -509,7 +607,7 @@ export default function App() {
       setRoomInfo(info);
       setGameMode(info.play_mode);
       setRoomStarter(null);
-      setScreen("room");
+      setScreen(info.state === "waiting" ? "room" : "roomGame");
     } catch (err) {
       setError(toUserError(err, "Не удалось подключиться"));
     }
@@ -525,6 +623,7 @@ export default function App() {
       setRoomStarter(`Игру начинает: ${res.starter_name}`);
       const info = await api.roomStatus(apiConfig, roomInfo.room_code);
       setRoomInfo(info);
+      setScreen("roomGame");
     } catch (err) {
       setError(toUserError(err, "Не удалось начать игру"));
     }
@@ -554,6 +653,32 @@ export default function App() {
     }
   };
 
+  const handleResumeRoom = async () => {
+    if (!roomInfo) return;
+    setError(null);
+
+    try {
+      const info = await api.roomResume(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
+  const handleLeaveRoom = async () => {
+    if (!roomInfo) return;
+    const ok = window.confirm("Точно ли вы хотите выйти?");
+    if (!ok) return;
+
+    try {
+      await api.roomLeave(apiConfig, roomInfo.room_code);
+    } catch {
+      // ignore leave errors and close local session
+    } finally {
+      resetAll();
+    }
+  };
+
   const handleRestartRoom = async () => {
     if (!roomInfo) return;
     setError(null);
@@ -565,6 +690,7 @@ export default function App() {
       const info = await api.roomStatus(apiConfig, roomInfo.room_code);
       setRoomInfo(info);
       setStatus(null);
+      setScreen("roomGame");
     } catch (err) {
       setStatus(null);
       setError(toUserError(err, "Не удалось перезапустить игру"));
@@ -1022,8 +1148,10 @@ export default function App() {
                 <div className="title">
                   Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
                 </div>
+                <p className="text">Хост: {roomInfo.host_name || roomInfo.owner_name}</p>
                 <p className="text">Игроков: {roomInfo.player_count}</p>
                 <p className="text">Лимит: {roomInfo.player_limit ?? MAX_PLAYERS}</p>
+                <p className="text">Начинает: {starterDisplayName ?? "определится после старта"}</p>
 
                 <div className="players">
                   {roomInfo.players.map((player) => (
@@ -1033,79 +1161,93 @@ export default function App() {
                   ))}
                 </div>
 
-                {roomInfo.state === "waiting" && (
+                {roomInfo.can_start ? (
                   <div className="actions">
-                    {roomInfo.can_start ? (
-                      <button className="btn" onClick={handleStartRoom}>
+                    <button className="btn" onClick={handleStartRoom}>
+                      Начать игру
+                    </button>
+                  </div>
+                ) : (
+                  <div className="hint">Ожидаем минимум {MIN_PLAYERS} игроков</div>
+                )}
+
+                {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
+                <button className="link" onClick={resetAll}>
+                  Новая игра
+                </button>
+              </div>
+            )}
+
+            {screen === "roomGame" && roomInfo && (
+              <div className="card center room-game-card">
+                <div className="title">
+                  Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
+                </div>
+                <p className="text">Хост: {roomInfo.host_name || roomInfo.owner_name}</p>
+
+                <div className="players">
+                  {roomInfo.players.map((player) => (
+                    <div key={player.user_id} className="player">
+                      {player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="turn-board">
+                  <div className="text">Начинает: {starterDisplayName ?? "—"}</div>
+                  <div className="text">
+                    Сейчас ход: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
+                  </div>
+
+                  {roomInfo.timer_enabled && roomInfo.turn_state === "turn_loop_active" && roomInfo.state === "started" && renderTurnProgress()}
+
+                  {roomInfo.state === "paused" && (
+                    <div className="hint danger">
+                      Игра на паузе. Таймер остановлен.
+                    </div>
+                  )}
+                  {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
+                </div>
+
+                <div className="actions stack">
+                  <button className="btn" onClick={handleGetRole}>
+                    Показать мою роль
+                  </button>
+
+                  {roomInfo.timer_enabled &&
+                    roomInfo.turn_state === "ready_to_start" &&
+                    roomInfo.state === "started" &&
+                    roomInfo.you_are_owner && (
+                      <button className="btn" onClick={handleStartRoomTurn}>
                         Начать игру
                       </button>
-                    ) : (
-                      <div className="hint">Ожидаем минимум {MIN_PLAYERS} игроков</div>
                     )}
-                  </div>
-                )}
 
-                {roomInfo.state === "started" && (
-                  <div className="actions">
-                    <button className="btn" onClick={handleGetRole}>
-                      Показать мою роль
+                  {roomInfo.state === "paused" && roomInfo.you_are_owner && (
+                    <button className="btn" onClick={handleResumeRoom}>
+                      Продолжить игру
                     </button>
-                    {roomInfo.you_are_owner && (!roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
-                      <button className="btn secondary" onClick={handleRestartRoom}>
-                        Сыграть ещё
+                  )}
+
+                  {roomInfo.timer_enabled &&
+                    roomInfo.turn_state === "turn_loop_active" &&
+                    roomInfo.state === "started" &&
+                    roomInfo.you_are_owner && (
+                      <button className="btn secondary" onClick={handleFinishRoomTurn}>
+                        Игра окончена
                       </button>
                     )}
-                  </div>
-                )}
 
-                {roomInfo.state === "started" && roomInfo.timer_enabled && (
-                  <div className="turn-board">
-                    {roomInfo.turn_state === "ready_to_start" && (
-                      <>
-                        <div className="title">
-                          Начинает: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
-                        </div>
-                        {roomInfo.you_are_owner ? (
-                          <div className="actions">
-                            <button className="btn" onClick={handleStartRoomTurn}>
-                              Начать игру
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="hint">Ожидаем, пока создатель комнаты запустит ходы</div>
-                        )}
-                      </>
-                    )}
+                  {roomInfo.you_are_owner && (!roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
+                    <button className="btn secondary" onClick={handleRestartRoom}>
+                      Сыграть ещё
+                    </button>
+                  )}
+                </div>
 
-                    {roomInfo.turn_state === "turn_loop_active" && (
-                      <>
-                        <div className="title">
-                          Ход игрока: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
-                        </div>
-                        {renderTurnProgress()}
-                        {roomInfo.you_are_owner ? (
-                          <div className="actions">
-                            <button className="btn secondary" onClick={handleFinishRoomTurn}>
-                              Игра окончена
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="hint">Только создатель комнаты может завершить игру</div>
-                        )}
-                      </>
-                    )}
-
-                    {roomInfo.turn_state === "finished" && <div className="hint">Игра завершена.</div>}
-                  </div>
-                )}
-
-                {roomStarter && <div className="hint">{roomStarter}</div>}
-
-                {(roomInfo.state !== "started" || !roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
-                  <button className="link" onClick={resetAll}>
-                    Новая игра
-                  </button>
-                )}
+                <button className="leave-link" onClick={handleLeaveRoom}>
+                  Выйти из комнаты
+                </button>
               </div>
             )}
 
@@ -1138,7 +1280,7 @@ export default function App() {
                 )}
                 <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
                 <div className="actions">
-                  <button className="btn" onClick={() => setScreen("room")}>
+                  <button className="btn" onClick={() => setScreen("roomGame")}>
                     Назад
                   </button>
                 </div>

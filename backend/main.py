@@ -39,6 +39,10 @@ TURN_STATE_WAITING = "waiting"
 TURN_STATE_READY_TO_START = "ready_to_start"
 TURN_STATE_ACTIVE = "turn_loop_active"
 TURN_STATE_FINISHED = "finished"
+ROOM_STATE_WAITING = "waiting"
+ROOM_STATE_STARTED = "started"
+ROOM_STATE_PAUSED = "paused"
+HEARTBEAT_STALE_SECONDS = 20
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 INIT_DATA_BYPASS = os.getenv("INIT_DATA_BYPASS", "0") == "1"
@@ -167,6 +171,11 @@ class RoomActionRequest(BaseRequest):
     room_code: str
 
 
+class RoomLeaveResponse(BaseModel):
+    left: bool
+    room_closed: bool
+
+
 class RoomPlayer(BaseModel):
     user_id: int
     first_name: Optional[str] = None
@@ -187,6 +196,7 @@ class RoomInfo(BaseModel):
     can_start: bool
     you_are_owner: bool
     starter_name: Optional[str] = None
+    host_name: str
     timer_enabled: bool = False
     turn_time_seconds: Optional[int] = None
     turn_active: bool = False
@@ -195,6 +205,7 @@ class RoomInfo(BaseModel):
     current_turn_name: Optional[str] = None
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
+    status_message: Optional[str] = None
 
 
 class RoomStartResponse(BaseModel):
@@ -232,6 +243,7 @@ class OfflineSession:
     spy_players: List[int] = field(default_factory=list)
     cards_for_players: Dict[int, Optional[str]] = field(default_factory=dict)
     random_allowed_modes: List[str] = field(default_factory=list)
+    starter_player_number: Optional[int] = None
     state: str = OFFLINE_STATE_REVEALING
     created_at: datetime = field(default_factory=datetime.utcnow)
 
@@ -244,6 +256,7 @@ class RoomSession:
     format_mode: str
     play_mode: str = "standard"
     players: Dict[int, Dict[str, Optional[str]]] = field(default_factory=dict)
+    last_seen_by_user: Dict[int, float] = field(default_factory=dict)
     resolved_random_mode: Optional[str] = None
     random_allowed_modes: List[str] = field(default_factory=list)
     player_limit: int = MAX_PLAYERS
@@ -257,8 +270,10 @@ class RoomSession:
     turns_completed: bool = False
     spy_user_ids: List[int] = field(default_factory=list)
     cards_by_user: Dict[int, Optional[str]] = field(default_factory=dict)
-    state: str = "waiting"
+    state: str = ROOM_STATE_WAITING
     starter_user_id: Optional[int] = None
+    last_status_message: Optional[str] = None
+    last_status_at: Optional[float] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -273,7 +288,7 @@ def cleanup_sessions() -> None:
         if now - session.created_at > timedelta(minutes=APP_TTL_MINUTES):
             del offline_sessions[session_id]
     for room_code, room in list(rooms.items()):
-        if now - room.created_at > timedelta(minutes=APP_TTL_MINUTES) and room.state == "waiting":
+        if now - room.created_at > timedelta(minutes=APP_TTL_MINUTES) and room.state == ROOM_STATE_WAITING:
             del rooms[room_code]
 
 
@@ -433,6 +448,83 @@ def ensure_room_players_order(room: RoomSession) -> None:
     logger.warning("Room %s has no players while resolving turn order", room.room_code)
 
 
+def set_room_status_message(room: RoomSession, message: str) -> None:
+    room.last_status_message = message
+    room.last_status_at = time.time()
+
+
+def touch_room_user(room: RoomSession, user_id: int) -> None:
+    if user_id in room.players:
+        room.last_seen_by_user[user_id] = time.time()
+
+
+def pause_room_after_participant_change(room: RoomSession, message: str) -> None:
+    if room.state in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED):
+        room.state = ROOM_STATE_PAUSED
+        room.turn_active = False
+        room.turn_started_at = None
+    set_room_status_message(room, message)
+
+
+def remove_room_participant(room: RoomSession, user_id: int, reason_message: str) -> bool:
+    entry = room.players.get(user_id)
+    if not entry:
+        return False
+    display_name = entry.get("display_name") or f"Игрок {user_id}"
+
+    removed_index: Optional[int] = None
+    if user_id in room.players_order:
+        removed_index = room.players_order.index(user_id)
+        room.players_order.pop(removed_index)
+
+    del room.players[user_id]
+    room.last_seen_by_user.pop(user_id, None)
+    room.cards_by_user.pop(user_id, None)
+    room.spy_user_ids = [spy_id for spy_id in room.spy_user_ids if spy_id != user_id]
+
+    if room.starter_user_id == user_id:
+        room.starter_user_id = room.players_order[0] if room.players_order else None
+
+    if room.players_order:
+        if removed_index is not None:
+            if removed_index < room.current_turn_index:
+                room.current_turn_index -= 1
+            elif removed_index == room.current_turn_index and room.current_turn_index >= len(room.players_order):
+                room.current_turn_index = 0
+        room.current_turn_index = clamp_turn_index(
+            room.current_turn_index,
+            len(room.players_order),
+            f"room:{room.room_code}",
+        )
+    else:
+        room.current_turn_index = 0
+        room.turn_active = False
+        room.turn_started_at = None
+        room.turn_state = TURN_STATE_FINISHED
+        room.turns_completed = True
+
+    if room.owner_user_id == user_id and room.players:
+        new_owner_id = room.players_order[0] if room.players_order else next(iter(room.players.keys()))
+        room.owner_user_id = new_owner_id
+        new_owner_entry = room.players.get(new_owner_id)
+        room.owner_name = (new_owner_entry or {}).get("display_name") or ""
+
+    pause_room_after_participant_change(room, f"{display_name} {reason_message}")
+    return True
+
+
+def drop_stale_room_players(room: RoomSession) -> bool:
+    now = time.time()
+    stale_user_ids = [
+        user_id
+        for user_id, last_seen in room.last_seen_by_user.items()
+        if user_id in room.players and now - last_seen > HEARTBEAT_STALE_SECONDS
+    ]
+    for user_id in stale_user_ids:
+        remove_room_participant(room, user_id, "вышел из комнаты")
+    return len(room.players) == 0
+
+
 def normalize_offline_turn_state(session: OfflineSession) -> bool:
     if not session.timer_enabled:
         session.turn_time_seconds = None
@@ -565,7 +657,7 @@ def advance_offline_turn(session: OfflineSession) -> None:
 
 
 def advance_room_turn(room: RoomSession) -> None:
-    if room.state != "started" or room.turn_state != TURN_STATE_ACTIVE or not room.turn_active:
+    if room.state != ROOM_STATE_STARTED or room.turn_state != TURN_STATE_ACTIVE or not room.turn_active:
         return
     if not normalize_room_turn_state(room):
         return
@@ -672,6 +764,7 @@ async def offline_start(request: OfflineStartRequest) -> OfflineStartResponse:
         spy_players=spies,
         cards_for_players=cards_for_players,
         random_allowed_modes=random_allowed or [],
+        starter_player_number=None,
     )
 
     return OfflineStartResponse(
@@ -732,9 +825,12 @@ async def offline_close(request: OfflineCloseRequest) -> OfflineCloseResponse:
             current_player_number=session.current_player_number,
         )
 
+    starter = random_int(1, session.player_count)
+    session.starter_player_number = starter
+
     if session.timer_enabled:
         session.state = TURN_STATE_READY_TO_START
-        session.current_turn_index = 0
+        session.current_turn_index = session.players_order.index(starter)
         session.turn_started_at = None
         session.turn_active = False
         session.turns_completed = False
@@ -744,7 +840,6 @@ async def offline_close(request: OfflineCloseRequest) -> OfflineCloseResponse:
         session.turn_started_at = None
         session.turn_active = False
         session.turns_completed = True
-    starter = random_int(1, session.player_count)
     return OfflineCloseResponse(
         finished=True,
         starter_player_number=starter,
@@ -784,6 +879,7 @@ async def offline_restart(request: OfflineRestartRequest) -> OfflineStartRespons
     session.turn_started_at = None
     session.turn_active = False
     session.turns_completed = False
+    session.starter_player_number = None
 
     return OfflineStartResponse(
         session_id=session.session_id,
@@ -909,6 +1005,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         turns_completed=False,
     )
     room.players[user_id] = owner_entry
+    touch_room_user(room, user_id)
     rooms[room_code] = room
 
     return room_to_info(room, user_id)
@@ -923,6 +1020,9 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Комната не найдена")
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Комната не найдена")
     if room.format_mode != "online":
         raise HTTPException(status_code=400, detail="Эта комната доступна только в онлайн-режиме")
     if request.format_mode and request.format_mode != "online":
@@ -935,7 +1035,7 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
             room.room_code,
             user_id,
         )
-    if room.state != "waiting":
+    if room.state != ROOM_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Игра уже началась")
     if user_id not in room.players and len(room.players) >= room.player_limit:
         raise HTTPException(status_code=400, detail="Комната заполнена")
@@ -943,6 +1043,7 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     if user_id not in room.players:
         entry = build_player_entry(user, len(room.players) + 1)
         room.players[user_id] = entry
+    touch_room_user(room, user_id)
 
     return room_to_info(room, user_id)
 
@@ -956,8 +1057,13 @@ async def room_status(request: RoomActionRequest) -> RoomInfo:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Вы вышли из комнаты")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
 
-    advance_room_turn(room)
     return room_to_info(room, user_id)
 
 
@@ -970,9 +1076,13 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can start")
-    if room.state != "waiting":
+    if room.state != ROOM_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Game already started")
     if len(room.players) < MIN_PLAYERS:
         raise HTTPException(status_code=400, detail="Not enough players")
@@ -990,9 +1100,11 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     room.spy_user_ids = spies
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
-    room.state = "started"
+    room.state = ROOM_STATE_STARTED
     room.players_order = players
-    room.current_turn_index = 0
+    starter_user_id = random_choice(players)
+    room.starter_user_id = starter_user_id
+    room.current_turn_index = room.players_order.index(starter_user_id)
     room.turn_started_at = None
     room.turn_active = False
     if room.timer_enabled:
@@ -1002,10 +1114,10 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
         room.turn_state = TURN_STATE_FINISHED
         room.turns_completed = True
 
-    starter_user_id = random_choice(players)
-    room.starter_user_id = starter_user_id
     starter_entry = room.players.get(starter_user_id)
     starter_name = starter_entry.get("display_name") if starter_entry else ""
+    room.last_status_message = None
+    room.last_status_at = None
     return RoomStartResponse(
         started=True,
         starter_user_id=starter_user_id,
@@ -1022,10 +1134,14 @@ async def room_role(request: RoomActionRequest) -> RoomRoleResponse:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    if room.state != "started":
+    if room.state not in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED):
         raise HTTPException(status_code=400, detail="Game not started")
     if user_id not in room.players:
         raise HTTPException(status_code=403, detail="Not in room")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
 
     card = room.cards_by_user.get(user_id)
     if card:
@@ -1043,8 +1159,14 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can restart")
+    if len(room.players) < MIN_PLAYERS:
+        raise HTTPException(status_code=400, detail="Недостаточно игроков для перезапуска")
 
     players = list(room.players.keys())
     try:
@@ -1060,9 +1182,10 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     room.spy_user_ids = spies
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
-    room.state = "started"
+    room.state = ROOM_STATE_STARTED
     room.players_order = players
-    room.current_turn_index = 0
+    room.starter_user_id = random_choice(players)
+    room.current_turn_index = room.players_order.index(room.starter_user_id)
     room.turn_started_at = None
     room.turn_active = False
     if room.timer_enabled:
@@ -1071,10 +1194,10 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     else:
         room.turn_state = TURN_STATE_FINISHED
         room.turns_completed = True
-    room.starter_user_id = random_choice(players)
-
     starter_entry = room.players.get(room.starter_user_id)
     starter_name = starter_entry.get("display_name") if starter_entry else ""
+    room.last_status_message = None
+    room.last_status_at = None
 
     return RoomRestartResponse(
         started=True,
@@ -1092,7 +1215,13 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    if room.state != "started":
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.state == ROOM_STATE_PAUSED:
+        raise HTTPException(status_code=400, detail="Игра на паузе")
+    if room.state != ROOM_STATE_STARTED:
         raise HTTPException(status_code=400, detail="Game not started")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can control turns")
@@ -1110,7 +1239,6 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     if room.turn_started_at is None:
         room.turn_started_at = time.time()
 
-    advance_room_turn(room)
     return room_to_info(room, user_id)
 
 
@@ -1123,7 +1251,11 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
     room = rooms.get(request.room_code.upper())
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    if room.state != "started":
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.state not in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED):
         raise HTTPException(status_code=400, detail="Game not started")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can finish")
@@ -1137,6 +1269,73 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
     room.turn_started_at = None
     room.turns_completed = True
     return room_to_info(room, user_id)
+
+
+@app.post("/api/room/resume", response_model=RoomInfo)
+async def room_resume(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room = rooms.get(request.room_code.upper())
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Only owner can resume")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Not in room")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.state != ROOM_STATE_PAUSED:
+        raise HTTPException(status_code=400, detail="Игра не на паузе")
+
+    room.state = ROOM_STATE_STARTED
+    if room.timer_enabled and room.turn_state == TURN_STATE_ACTIVE:
+        room.turn_active = True
+        room.turn_started_at = time.time()
+    set_room_status_message(room, "Игра продолжена")
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/heartbeat", response_model=RoomInfo)
+async def room_heartbeat(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room = rooms.get(request.room_code.upper())
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Вы вышли из комнаты")
+
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(request.room_code.upper(), None)
+        raise HTTPException(status_code=404, detail="Room not found")
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/leave", response_model=RoomLeaveResponse)
+async def room_leave(request: RoomActionRequest) -> RoomLeaveResponse:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+    room_code = request.room_code.upper()
+
+    room = rooms.get(room_code)
+    if not room:
+        return RoomLeaveResponse(left=True, room_closed=True)
+    if user_id not in room.players:
+        return RoomLeaveResponse(left=False, room_closed=False)
+
+    remove_room_participant(room, user_id, "вышел из комнаты")
+    if not room.players:
+        del rooms[room_code]
+        return RoomLeaveResponse(left=True, room_closed=True)
+    return RoomLeaveResponse(left=True, room_closed=False)
 
 
 @app.get("/api/cards/image")
@@ -1171,12 +1370,12 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
     advance_room_turn(room)
     room.turns_completed = room.turn_state == TURN_STATE_FINISHED
     starter_name = None
-    if room.state == "started" and room.starter_user_id is not None:
+    if room.state in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED) and room.starter_user_id is not None:
         starter_entry = room.players.get(room.starter_user_id)
         if starter_entry:
             starter_name = starter_entry.get("display_name")
     current_turn_name = None
-    if room.state == "started" and room.timer_enabled and room.turn_state in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
+    if room.state in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED) and room.timer_enabled and room.turn_state in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
         current_turn_user_id = current_room_turn_user_id(room)
     else:
         current_turn_user_id = None
@@ -1188,6 +1387,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         room_code=room.room_code,
         owner_user_id=room.owner_user_id,
         owner_name=room.owner_name,
+        host_name=room.owner_name,
         format_mode=room.format_mode,
         play_mode=room.play_mode,
         players=[
@@ -1202,7 +1402,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         player_count=len(room.players),
         player_limit=room.player_limit,
         state=room.state,
-        can_start=(room.owner_user_id == user_id and room.state == "waiting" and len(room.players) >= MIN_PLAYERS),
+        can_start=(room.owner_user_id == user_id and room.state == ROOM_STATE_WAITING and len(room.players) >= MIN_PLAYERS),
         you_are_owner=(room.owner_user_id == user_id),
         starter_name=starter_name,
         timer_enabled=room.timer_enabled,
@@ -1213,6 +1413,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         current_turn_name=current_turn_name,
         turn_started_at=room.turn_started_at,
         turns_completed=room.turns_completed,
+        status_message=room.last_status_message,
     )
 
 
