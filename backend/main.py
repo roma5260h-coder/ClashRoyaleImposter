@@ -10,7 +10,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import parse_qsl, quote
 from urllib.request import Request as UrlRequest, urlopen
 
@@ -45,6 +45,8 @@ ROOM_STATE_WAITING = "waiting"
 ROOM_STATE_STARTED = "started"
 ROOM_STATE_PAUSED = "paused"
 HEARTBEAT_STALE_SECONDS = 20
+BOT_ID_PREFIX = "bot_"
+BOT_NAME_PATTERN = re.compile(r"^Bot (\d+)$")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 INIT_DATA_BYPASS = os.getenv("INIT_DATA_BYPASS", "0") == "1"
@@ -54,6 +56,37 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("spy_game")
 APP_ENV = os.getenv("APP_ENV", "").strip().lower()
 ROOM_DEBUG = os.getenv("ROOM_DEBUG", "0") == "1" or APP_ENV in {"dev", "development", "local"}
+NODE_ENV = os.getenv("NODE_ENV", "").strip().lower()
+DEV_TOOLS_ENABLED = (
+    os.getenv("DEV_TOOLS_ENABLED", "0") == "1"
+    or APP_ENV in {"dev", "development", "local", "test"}
+    or (NODE_ENV and NODE_ENV != "production")
+)
+
+
+def parse_dev_admin_ids() -> Set[int]:
+    raw_values = ",".join(
+        value
+        for value in [
+            os.getenv("DEV_ADMIN_IDS", ""),
+            os.getenv("DEV_ADMIN_TG_ID", ""),
+        ]
+        if value
+    )
+    admin_ids: Set[int] = set()
+    for chunk in raw_values.split(","):
+        normalized = chunk.strip()
+        if not normalized:
+            continue
+        try:
+            admin_ids.add(int(normalized))
+        except ValueError:
+            logger.warning("Skipping invalid DEV admin id: %s", normalized)
+    return admin_ids
+
+
+DEV_ADMIN_IDS = parse_dev_admin_ids()
+PlayerId = Union[int, str]
 
 app = FastAPI(title="Spy Game API")
 
@@ -175,16 +208,21 @@ class RoomActionRequest(BaseRequest):
     room_code: str
 
 
+class RoomBotsAddRequest(RoomActionRequest):
+    count: int = Field(..., ge=1, le=10)
+
+
 class RoomLeaveResponse(BaseModel):
     left: bool
     room_closed: bool
 
 
 class RoomPlayer(BaseModel):
-    user_id: int
+    user_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     display_name: str
+    isBot: bool = False
 
 
 class RoomInfo(BaseModel):
@@ -214,7 +252,7 @@ class RoomInfo(BaseModel):
 
 class RoomStartResponse(BaseModel):
     started: bool
-    starter_user_id: int
+    starter_user_id: str
     starter_name: str
 
 
@@ -259,23 +297,23 @@ class RoomSession:
     owner_name: str
     format_mode: str
     play_mode: str = "standard"
-    players: Dict[int, Dict[str, Optional[str]]] = field(default_factory=dict)
-    last_seen_by_user: Dict[int, float] = field(default_factory=dict)
+    players: Dict[PlayerId, Dict[str, object]] = field(default_factory=dict)
+    last_seen_by_user: Dict[PlayerId, float] = field(default_factory=dict)
     resolved_random_mode: Optional[str] = None
     random_allowed_modes: List[str] = field(default_factory=list)
     player_limit: int = MAX_PLAYERS
     timer_enabled: bool = False
     turn_time_seconds: Optional[int] = None
     current_turn_index: int = 0
-    players_order: List[int] = field(default_factory=list)
+    players_order: List[PlayerId] = field(default_factory=list)
     turn_active: bool = False
     turn_state: str = TURN_STATE_WAITING
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
-    spy_user_ids: List[int] = field(default_factory=list)
-    cards_by_user: Dict[int, Optional[str]] = field(default_factory=dict)
+    spy_user_ids: List[PlayerId] = field(default_factory=list)
+    cards_by_user: Dict[PlayerId, Optional[str]] = field(default_factory=dict)
     state: str = ROOM_STATE_WAITING
-    starter_user_id: Optional[int] = None
+    starter_user_id: Optional[PlayerId] = None
     last_status_message: Optional[str] = None
     last_status_at: Optional[float] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -352,13 +390,24 @@ def require_display_name(user: Dict[str, str]) -> str:
     return name
 
 
-def build_player_entry(user: Dict[str, str], index: int) -> Dict[str, Optional[str]]:
+def build_player_entry(user: Dict[str, str], index: int) -> Dict[str, object]:
     name = require_display_name(user)
     return {
         "user_id": int(user.get("id", 0)),
         "first_name": user.get("first_name"),
         "last_name": user.get("last_name"),
         "display_name": name,
+        "is_bot": False,
+    }
+
+
+def build_bot_entry(bot_id: str, bot_number: int) -> Dict[str, object]:
+    return {
+        "user_id": bot_id,
+        "first_name": None,
+        "last_name": None,
+        "display_name": f"Bot {bot_number}",
+        "is_bot": True,
     }
 
 
@@ -484,7 +533,11 @@ def set_room_status_message(room: RoomSession, message: str) -> None:
     room.last_status_at = time.time()
 
 
-def touch_room_user(room: RoomSession, user_id: int) -> None:
+def real_room_player_ids(room: RoomSession) -> List[int]:
+    return [player_id for player_id in room.players.keys() if isinstance(player_id, int)]
+
+
+def touch_room_user(room: RoomSession, user_id: PlayerId) -> None:
     if user_id in room.players:
         room.last_seen_by_user[user_id] = time.time()
 
@@ -497,11 +550,11 @@ def pause_room_after_participant_change(room: RoomSession, message: str) -> None
     set_room_status_message(room, message)
 
 
-def remove_room_participant(room: RoomSession, user_id: int, reason_message: str) -> bool:
+def remove_room_participant(room: RoomSession, user_id: PlayerId, reason_message: str) -> bool:
     entry = room.players.get(user_id)
     if not entry:
         return False
-    display_name = entry.get("display_name") or f"Игрок {user_id}"
+    display_name = str(entry.get("display_name") or f"Игрок {user_id}")
 
     removed_index: Optional[int] = None
     if user_id in room.players_order:
@@ -535,10 +588,19 @@ def remove_room_participant(room: RoomSession, user_id: int, reason_message: str
         room.turns_completed = True
 
     if room.owner_user_id == user_id and room.players:
-        new_owner_id = room.players_order[0] if room.players_order else next(iter(room.players.keys()))
-        room.owner_user_id = new_owner_id
-        new_owner_entry = room.players.get(new_owner_id)
-        room.owner_name = (new_owner_entry or {}).get("display_name") or ""
+        real_ids_in_order = [player_id for player_id in room.players_order if isinstance(player_id, int)]
+        fallback_real_ids = real_room_player_ids(room)
+        next_owner_id: Optional[int] = (
+            real_ids_in_order[0]
+            if real_ids_in_order
+            else (fallback_real_ids[0] if fallback_real_ids else None)
+        )
+        if next_owner_id is not None:
+            room.owner_user_id = next_owner_id
+            new_owner_entry = room.players.get(next_owner_id)
+            room.owner_name = str((new_owner_entry or {}).get("display_name") or "")
+        else:
+            room.owner_name = ""
 
     pause_room_after_participant_change(room, f"{display_name} {reason_message}")
     return True
@@ -557,7 +619,65 @@ def drop_stale_room_players(room: RoomSession) -> bool:
     ]
     for user_id in stale_user_ids:
         remove_room_participant(room, user_id, "вышел из комнаты")
-    return len(room.players) == 0
+    return len(room.players) == 0 or len(real_room_player_ids(room)) == 0
+
+
+def is_dev_admin(user_id: int) -> bool:
+    return user_id in DEV_ADMIN_IDS
+
+
+def ensure_room_dev_bot_access(room: RoomSession, user_id: int) -> None:
+    if not DEV_TOOLS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Вы не в комнате")
+    if room.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Только хост может управлять ботами")
+    if not is_dev_admin(user_id):
+        raise HTTPException(status_code=403, detail="DEV доступ запрещён")
+
+
+def next_bot_number(room: RoomSession) -> int:
+    max_number = 0
+    for entry in room.players.values():
+        if not bool(entry.get("is_bot")):
+            continue
+        name = str(entry.get("display_name") or "")
+        match = BOT_NAME_PATTERN.match(name)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return max_number + 1
+
+
+def generate_bot_id(room: RoomSession) -> str:
+    for _ in range(5):
+        candidate = f"{BOT_ID_PREFIX}{uuid.uuid4().hex[:8]}"
+        if candidate not in room.players:
+            return candidate
+    return f"{BOT_ID_PREFIX}{uuid.uuid4().hex}"
+
+
+def add_room_bots(room: RoomSession, requested_count: int) -> int:
+    available_slots = max(0, room.player_limit - len(room.players))
+    to_add = min(max(requested_count, 0), available_slots)
+    if to_add <= 0:
+        return 0
+
+    start_number = next_bot_number(room)
+    for offset in range(to_add):
+        bot_id = generate_bot_id(room)
+        bot_number = start_number + offset
+        room.players[bot_id] = build_bot_entry(bot_id, bot_number)
+    return to_add
+
+
+def clear_room_bots(room: RoomSession) -> int:
+    bot_ids = [player_id for player_id, entry in room.players.items() if bool(entry.get("is_bot"))]
+    removed = 0
+    for bot_id in bot_ids:
+        if remove_room_participant(room, bot_id, "удалён из комнаты"):
+            removed += 1
+    return removed
 
 
 def normalize_offline_turn_state(session: OfflineSession) -> bool:
@@ -652,7 +772,7 @@ def current_offline_turn_player(session: OfflineSession) -> int:
     return session.players_order[session.current_turn_index]
 
 
-def current_room_turn_user_id(room: RoomSession) -> Optional[int]:
+def current_room_turn_user_id(room: RoomSession) -> Optional[PlayerId]:
     ensure_room_players_order(room)
     room.current_turn_index = clamp_turn_index(
         room.current_turn_index,
@@ -1025,7 +1145,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
     room = RoomSession(
         room_code=room_code,
         owner_user_id=user_id,
-        owner_name=owner_entry["display_name"],
+        owner_name=str(owner_entry["display_name"]),
         format_mode=request.format_mode,
         play_mode=request.game_mode,
         random_allowed_modes=random_allowed or [],
@@ -1088,6 +1208,99 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     touch_room_user(room, user_id)
     debug_room_storage("join:success", raw_room_code, room_code)
 
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/bots/add", response_model=RoomInfo)
+async def room_bots_add(request: RoomBotsAddRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    ensure_room_dev_bot_access(room, user_id)
+    if room.state != ROOM_STATE_WAITING:
+        raise HTTPException(status_code=400, detail="Добавлять ботов можно только до старта игры")
+
+    touch_room_user(room, user_id)
+    added = add_room_bots(room, request.count)
+    if added <= 0:
+        raise HTTPException(status_code=400, detail="Комната заполнена")
+    set_room_status_message(room, f"Добавлено ботов: {added}")
+    if ROOM_DEBUG:
+        logger.info(
+            "[room_debug] bots:add room=%s requested=%s added=%s players=%s/%s",
+            room.room_code,
+            request.count,
+            added,
+            len(room.players),
+            room.player_limit,
+        )
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/bots/fill", response_model=RoomInfo)
+async def room_bots_fill(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    ensure_room_dev_bot_access(room, user_id)
+    if room.state != ROOM_STATE_WAITING:
+        raise HTTPException(status_code=400, detail="Добавлять ботов можно только до старта игры")
+
+    touch_room_user(room, user_id)
+    remaining = max(0, room.player_limit - len(room.players))
+    if remaining <= 0:
+        raise HTTPException(status_code=400, detail="Комната заполнена")
+    added = add_room_bots(room, remaining)
+    set_room_status_message(room, f"Добавлено ботов: {added}")
+    if ROOM_DEBUG:
+        logger.info(
+            "[room_debug] bots:fill room=%s added=%s players=%s/%s",
+            room.room_code,
+            added,
+            len(room.players),
+            room.player_limit,
+        )
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/bots/clear", response_model=RoomInfo)
+async def room_bots_clear(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    ensure_room_dev_bot_access(room, user_id)
+    if room.state != ROOM_STATE_WAITING:
+        raise HTTPException(status_code=400, detail="Удалять ботов можно только до старта игры")
+
+    touch_room_user(room, user_id)
+    removed = clear_room_bots(room)
+    if removed > 0:
+        set_room_status_message(room, f"Удалено ботов: {removed}")
+    else:
+        set_room_status_message(room, "Ботов в комнате нет")
+    if ROOM_DEBUG:
+        logger.info(
+            "[room_debug] bots:clear room=%s removed=%s players=%s/%s",
+            room.room_code,
+            removed,
+            len(room.players),
+            room.player_limit,
+        )
     return room_to_info(room, user_id)
 
 
@@ -1160,12 +1373,12 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
         room.turns_completed = True
 
     starter_entry = room.players.get(starter_user_id)
-    starter_name = starter_entry.get("display_name") if starter_entry else ""
+    starter_name = str(starter_entry.get("display_name") or "") if starter_entry else ""
     room.last_status_message = None
     room.last_status_at = None
     return RoomStartResponse(
         started=True,
-        starter_user_id=starter_user_id,
+        starter_user_id=str(starter_user_id),
         starter_name=starter_name,
     )
 
@@ -1242,13 +1455,13 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
         room.turn_state = TURN_STATE_FINISHED
         room.turns_completed = True
     starter_entry = room.players.get(room.starter_user_id)
-    starter_name = starter_entry.get("display_name") if starter_entry else ""
+    starter_name = str(starter_entry.get("display_name") or "") if starter_entry else ""
     room.last_status_message = None
     room.last_status_at = None
 
     return RoomRestartResponse(
         started=True,
-        starter_user_id=room.starter_user_id or 0,
+        starter_user_id=str(room.starter_user_id or ""),
         starter_name=starter_name,
     )
 
@@ -1383,7 +1596,7 @@ async def room_leave(request: RoomActionRequest) -> RoomLeaveResponse:
         return RoomLeaveResponse(left=False, room_closed=False)
 
     remove_room_participant(room, user_id, "вышел из комнаты")
-    if not room.players:
+    if not room.players or not real_room_player_ids(room):
         del rooms[room_code]
         return RoomLeaveResponse(left=True, room_closed=True)
     return RoomLeaveResponse(left=True, room_closed=False)
@@ -1424,7 +1637,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
     if room.state in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED) and room.starter_user_id is not None:
         starter_entry = room.players.get(room.starter_user_id)
         if starter_entry:
-            starter_name = starter_entry.get("display_name")
+            starter_name = str(starter_entry.get("display_name") or "")
     current_turn_name = None
     if room.state in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED) and room.timer_enabled and room.turn_state in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
         current_turn_user_id = current_room_turn_user_id(room)
@@ -1433,7 +1646,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
     if current_turn_user_id is not None:
         current_turn_entry = room.players.get(current_turn_user_id)
         if current_turn_entry:
-            current_turn_name = current_turn_entry.get("display_name")
+            current_turn_name = str(current_turn_entry.get("display_name") or "")
     return RoomInfo(
         room_code=room.room_code,
         owner_user_id=room.owner_user_id,
@@ -1443,10 +1656,11 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         play_mode=room.play_mode,
         players=[
             RoomPlayer(
-                user_id=entry["user_id"],
-                first_name=entry.get("first_name"),
-                last_name=entry.get("last_name"),
-                display_name=entry.get("display_name") or "",
+                user_id=str(entry.get("user_id", "")),
+                first_name=str(entry.get("first_name")) if entry.get("first_name") is not None else None,
+                last_name=str(entry.get("last_name")) if entry.get("last_name") is not None else None,
+                display_name=str(entry.get("display_name") or ""),
+                isBot=bool(entry.get("is_bot")),
             )
             for entry in room.players.values()
         ],
@@ -1468,13 +1682,13 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
     )
 
 
-def random_choice(items: List[int]) -> int:
+def random_choice(items: List[PlayerId]) -> PlayerId:
     if not items:
         return 0
     return secrets.choice(items)
 
 
-def log_random(event: str, players: List[int], spies: List[int]) -> None:
+def log_random(event: str, players: List[PlayerId], spies: List[PlayerId]) -> None:
     if DEBUG_RANDOM:
         print(f"[RANDOM] {event} players={players} spies={spies}")
 

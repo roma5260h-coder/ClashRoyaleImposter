@@ -286,6 +286,19 @@ body {
   font-weight: 700;
 }
 
+.room-code-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.room-code-button .room-code {
+  text-decoration: none;
+}
+
 .card-image-wrapper {
   position: relative;
 }
@@ -483,6 +496,48 @@ body {
 
 .leave-link:hover {
   text-decoration: underline;
+}
+
+.dev-tools-trigger {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  opacity: 0.35;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  align-self: center;
+  transition: opacity 0.15s ease;
+}
+
+.dev-tools-trigger:hover {
+  opacity: 0.7;
+}
+
+.dev-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(3, 5, 10, 0.62);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+}
+
+.dev-modal {
+  width: min(420px, 100%);
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: rgba(18, 22, 35, 0.95);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 

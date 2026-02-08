@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiConfig } from "./api";
-import type { GameFormat, GameMode, RoomInfo, TurnState } from "./types";
+import type { GameFormat, GameMode, RoomInfo, RoomPlayer, TurnState } from "./types";
 
 const tg = (window as any).Telegram?.WebApp;
 
@@ -45,6 +45,15 @@ const RANDOM_SCENARIOS = [
 
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
 const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
+const DEV_APP_MODE =
+  import.meta.env.DEV ||
+  import.meta.env.MODE !== "production" ||
+  import.meta.env.VITE_APP_ENV === "dev" ||
+  import.meta.env.VITE_APP_ENV === "development";
+const DEV_ADMIN_IDS = String(import.meta.env.VITE_DEV_ADMIN_IDS ?? "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
@@ -98,12 +107,17 @@ export default function App() {
   } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
+  const [showRoomDevTools, setShowRoomDevTools] = useState<boolean>(false);
+  const [roomCodeTapCount, setRoomCodeTapCount] = useState<number>(0);
+  const [devActionLoading, setDevActionLoading] = useState<boolean>(false);
   const leaveSentRef = useRef<boolean>(false);
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
+  const telegramUserId = String(tg?.initDataUnsafe?.user?.id ?? "").trim();
+  const isDevAdminUser = DEV_APP_MODE && telegramUserId.length > 0 && DEV_ADMIN_IDS.includes(telegramUserId);
 
   const resolveImageUrl = (url: string) => {
     if (/^https?:\/\//i.test(url)) return url;
@@ -113,6 +127,18 @@ export default function App() {
   };
 
   const apiConfig: ApiConfig = useMemo(() => ({ baseUrl: apiBase, initData }), [apiBase, initData]);
+  const canUseRoomDevTools = Boolean(
+    roomInfo &&
+      screen === "room" &&
+      roomInfo.you_are_owner &&
+      isDevAdminUser &&
+      DEV_APP_MODE
+  );
+
+  const renderPlayerName = (player: RoomPlayer) => {
+    const baseName = player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram";
+    return player.isBot ? `🤖 ${baseName}` : baseName;
+  };
 
   useEffect(() => {
     tg?.ready?.();
@@ -318,6 +344,19 @@ export default function App() {
     setRoomImageOk(true);
   }, [roomRole?.image_url, roomRole?.role]);
 
+  useEffect(() => {
+    if (!canUseRoomDevTools) {
+      setShowRoomDevTools(false);
+      setRoomCodeTapCount(0);
+    }
+  }, [canUseRoomDevTools]);
+
+  useEffect(() => {
+    if (roomCodeTapCount <= 0) return;
+    const timeout = window.setTimeout(() => setRoomCodeTapCount(0), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [roomCodeTapCount]);
+
   const activeTurn = useMemo(() => {
     if (
       screen === "offlineTurn" &&
@@ -394,6 +433,9 @@ export default function App() {
     setRoomInfo(null);
     setRoomRole(null);
     setRoomStarter(null);
+    setShowRoomDevTools(false);
+    setRoomCodeTapCount(0);
+    setDevActionLoading(false);
     setRoomCodeInput("");
     setStatus(null);
     setTurnRemainingMs(null);
@@ -604,6 +646,8 @@ export default function App() {
       );
       setRoomInfo(info);
       setRoomStarter(null);
+      setShowRoomDevTools(false);
+      setRoomCodeTapCount(0);
       setScreen("room");
     } catch (err) {
       setError(toUserError(err, "Не удалось создать комнату"));
@@ -636,6 +680,8 @@ export default function App() {
       setRoomInfo(info);
       setGameMode(info.play_mode);
       setRoomStarter(null);
+      setShowRoomDevTools(false);
+      setRoomCodeTapCount(0);
       setRoomCodeInput(normalizedCode);
       setScreen(info.state === "waiting" ? "room" : "roomGame");
     } catch (err) {
@@ -653,6 +699,7 @@ export default function App() {
       setRoomStarter(`Игру начинает: ${res.starter_name}`);
       const info = await api.roomStatus(apiConfig, roomInfo.room_code);
       setRoomInfo(info);
+      setShowRoomDevTools(false);
       setScreen("roomGame");
     } catch (err) {
       setError(toUserError(err, "Не удалось начать игру"));
@@ -709,6 +756,47 @@ export default function App() {
     }
   };
 
+  const handleLobbyCodeTap = () => {
+    if (!canUseRoomDevTools) return;
+    setRoomCodeTapCount((prev) => {
+      const next = prev + 1;
+      if (next >= 5) {
+        setShowRoomDevTools(true);
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  const runRoomDevAction = async (action: () => Promise<RoomInfo>) => {
+    if (!canUseRoomDevTools || !roomInfo) return;
+    setError(null);
+    setDevActionLoading(true);
+    try {
+      const updatedRoom = await action();
+      setRoomInfo(updatedRoom);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    } finally {
+      setDevActionLoading(false);
+    }
+  };
+
+  const handleRoomAddBots = async (count: number) => {
+    if (!roomInfo) return;
+    await runRoomDevAction(() => api.roomBotsAdd(apiConfig, roomInfo.room_code, count));
+  };
+
+  const handleRoomFillBots = async () => {
+    if (!roomInfo) return;
+    await runRoomDevAction(() => api.roomBotsFill(apiConfig, roomInfo.room_code));
+  };
+
+  const handleRoomClearBots = async () => {
+    if (!roomInfo) return;
+    await runRoomDevAction(() => api.roomBotsClear(apiConfig, roomInfo.room_code));
+  };
+
   const handleRestartRoom = async () => {
     if (!roomInfo) return;
     setError(null);
@@ -719,6 +807,7 @@ export default function App() {
       setRoomStarter(`Игру начинает: ${res.starter_name}`);
       const info = await api.roomStatus(apiConfig, roomInfo.room_code);
       setRoomInfo(info);
+      setShowRoomDevTools(false);
       setStatus(null);
       setScreen("roomGame");
     } catch (err) {
@@ -1176,14 +1265,17 @@ export default function App() {
             {screen === "room" && roomInfo && (
               <div className="card center room-lobby-card">
                 <div className="title">
-                  Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
+                  Код комнаты:{" "}
+                  <button type="button" className="room-code-button" onClick={handleLobbyCodeTap}>
+                    <span className="room-code">{roomInfo.room_code}</span>
+                  </button>
                 </div>
 
                 <div className="players">
                   {roomInfo.players.map((player) => (
                     <div key={player.user_id} className="player player-row">
-                      <span>{player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}</span>
-                      {player.user_id === roomInfo.owner_user_id && <span className="host-badge">хост</span>}
+                      <span>{renderPlayerName(player)}</span>
+                      {String(player.user_id) === String(roomInfo.owner_user_id) && <span className="host-badge">хост</span>}
                     </div>
                   ))}
                 </div>
@@ -1202,9 +1294,50 @@ export default function App() {
                 )}
 
                 {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
+                {canUseRoomDevTools && (
+                  <button
+                    type="button"
+                    className="dev-tools-trigger"
+                    aria-label="Открыть DEV панель"
+                    onClick={() => setShowRoomDevTools(true)}
+                  >
+                    ⋯
+                  </button>
+                )}
                 <button className="link" onClick={resetAll}>
                   Новая игра
                 </button>
+              </div>
+            )}
+
+            {showRoomDevTools && canUseRoomDevTools && roomInfo && (
+              <div className="dev-modal-backdrop" onClick={() => !devActionLoading && setShowRoomDevTools(false)}>
+                <div className="dev-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="title">DEV инструменты</div>
+                  <p className="text">Только для тестирования онлайн-лобби в одиночку.</p>
+                  <div className="actions stack">
+                    <button className="btn full" onClick={() => handleRoomAddBots(1)} disabled={devActionLoading}>
+                      Добавить бота +1
+                    </button>
+                    <button className="btn full" onClick={() => handleRoomAddBots(3)} disabled={devActionLoading}>
+                      Добавить 3 бота
+                    </button>
+                    <button className="btn full" onClick={handleRoomFillBots} disabled={devActionLoading}>
+                      Заполнить до лимита
+                    </button>
+                    <button className="btn secondary full" onClick={handleRoomClearBots} disabled={devActionLoading}>
+                      Удалить всех ботов
+                    </button>
+                    <button
+                      className="link"
+                      type="button"
+                      onClick={() => setShowRoomDevTools(false)}
+                      disabled={devActionLoading}
+                    >
+                      Закрыть
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1217,8 +1350,9 @@ export default function App() {
 
                 <div className="players">
                   {roomInfo.players.map((player) => (
-                    <div key={player.user_id} className="player">
-                      {player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}
+                    <div key={player.user_id} className="player player-row">
+                      <span>{renderPlayerName(player)}</span>
+                      {String(player.user_id) === String(roomInfo.owner_user_id) && <span className="host-badge">хост</span>}
                     </div>
                   ))}
                 </div>

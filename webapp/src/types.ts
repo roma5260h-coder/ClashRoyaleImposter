@@ -2,6 +2,14 @@ export type GameFormat = "offline" | "online";
 export type GameMode = "standard" | "random";
 export type TurnState = "waiting" | "ready_to_start" | "turn_loop_active" | "finished";
 
+export type RoomPlayer = {
+  user_id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  display_name: string;
+  isBot?: boolean;
+};
+
 export type RoomInfo = {
   room_code: string;
   owner_user_id: number;
@@ -9,7 +17,7 @@ export type RoomInfo = {
   host_name: string;
   format_mode: GameFormat;
   play_mode: GameMode;
-  players: { user_id: number; first_name?: string | null; last_name?: string | null; display_name: string }[];
+  players: RoomPlayer[];
   player_count: number;
   player_limit?: number;
   state: "waiting" | "started" | "paused" | "finished";

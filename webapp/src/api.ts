@@ -122,13 +122,13 @@ export const api = {
     post<RoomInfo>(config, "/api/room/status", { room_code: roomCode }),
 
   roomStart: (config: ApiConfig, roomCode: string) =>
-    post<{ started: boolean; starter_user_id: number; starter_name: string }>(
+    post<{ started: boolean; starter_user_id: string; starter_name: string }>(
       config,
       "/api/room/start",
       { room_code: roomCode }
     ),
   roomRestart: (config: ApiConfig, roomCode: string) =>
-    post<{ started: boolean; starter_user_id: number; starter_name: string }>(
+    post<{ started: boolean; starter_user_id: string; starter_name: string }>(
       config,
       "/api/room/restart",
       { room_code: roomCode }
@@ -148,6 +148,15 @@ export const api = {
 
   roomLeave: (config: ApiConfig, roomCode: string) =>
     post<{ left: boolean; room_closed: boolean }>(config, "/api/room/leave", { room_code: roomCode }),
+
+  roomBotsAdd: (config: ApiConfig, roomCode: string, count: number) =>
+    post<RoomInfo>(config, "/api/room/bots/add", { room_code: roomCode, count }),
+
+  roomBotsFill: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/bots/fill", { room_code: roomCode }),
+
+  roomBotsClear: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/bots/clear", { room_code: roomCode }),
 
   roomRole: (config: ApiConfig, roomCode: string) =>
     post<{ role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(
