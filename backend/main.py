@@ -115,6 +115,16 @@ def parse_dev_admin_usernames() -> Set[str]:
 DEV_ADMIN_USERNAMES = parse_dev_admin_usernames()
 PlayerId = Union[int, str]
 
+if ROOM_DEBUG or DEV_TOOLS_ENABLED:
+    logger.info(
+        "DEV tools config: enabled=%s app_env=%s node_env=%s admin_ids_count=%s admin_usernames=%s",
+        DEV_TOOLS_ENABLED,
+        APP_ENV or "-",
+        NODE_ENV or "-",
+        len(DEV_ADMIN_IDS),
+        sorted(DEV_ADMIN_USERNAMES),
+    )
+
 app = FastAPI(title="Spy Game API")
 
 allowed_origins = os.getenv("WEBAPP_ORIGINS", "").split(",")
@@ -1690,6 +1700,22 @@ def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None
         current_turn_entry = room.players.get(current_turn_user_id)
         if current_turn_entry:
             current_turn_name = str(current_turn_entry.get("display_name") or "")
+    is_lobby_owner = room.state == ROOM_STATE_WAITING and room.owner_user_id == user_id
+    is_allowed_dev_admin = is_dev_admin(user_id, username)
+    can_manage_bots_flag = bool(
+        DEV_TOOLS_ENABLED
+        and is_lobby_owner
+        and is_allowed_dev_admin
+    )
+    if ROOM_DEBUG and is_lobby_owner and not can_manage_bots_flag:
+        logger.info(
+            "[room_debug] can_manage_bots=false code=%s user_id=%s username=%s dev_enabled=%s is_dev_admin=%s",
+            room.room_code,
+            user_id,
+            username,
+            DEV_TOOLS_ENABLED,
+            is_allowed_dev_admin,
+        )
     return RoomInfo(
         room_code=room.room_code,
         owner_user_id=room.owner_user_id,
@@ -1722,12 +1748,7 @@ def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None
         turn_started_at=room.turn_started_at,
         turns_completed=room.turns_completed,
         status_message=room.last_status_message,
-        can_manage_bots=bool(
-            DEV_TOOLS_ENABLED
-            and room.state == ROOM_STATE_WAITING
-            and room.owner_user_id == user_id
-            and is_dev_admin(user_id, username)
-        ),
+        can_manage_bots=can_manage_bots_flag,
     )
 
 
