@@ -145,14 +145,15 @@ class RoomCreateRequest(BaseRequest):
     format_mode: str
     game_mode: str
     random_allowed_modes: Optional[List[str]] = None
+    player_limit: int = MAX_PLAYERS
     timer_enabled: bool = False
     turn_time_seconds: Optional[int] = None
 
 
 class RoomJoinRequest(BaseRequest):
     room_code: str
-    format_mode: str
-    game_mode: str
+    format_mode: Optional[str] = None
+    game_mode: Optional[str] = None
 
 
 class RoomActionRequest(BaseRequest):
@@ -174,6 +175,7 @@ class RoomInfo(BaseModel):
     play_mode: str
     players: List[RoomPlayer]
     player_count: int
+    player_limit: int
     state: str
     can_start: bool
     you_are_owner: bool
@@ -234,6 +236,7 @@ class RoomSession:
     players: Dict[int, Dict[str, Optional[str]]] = field(default_factory=dict)
     resolved_random_mode: Optional[str] = None
     random_allowed_modes: List[str] = field(default_factory=list)
+    player_limit: int = MAX_PLAYERS
     timer_enabled: bool = False
     turn_time_seconds: Optional[int] = None
     current_turn_index: int = 0
@@ -833,6 +836,8 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         raise HTTPException(status_code=400, detail="Invalid format mode")
     if request.game_mode not in ("standard", "random"):
         raise HTTPException(status_code=400, detail="Invalid game mode")
+    if request.player_limit < MIN_PLAYERS or request.player_limit > MAX_PLAYERS:
+        raise HTTPException(status_code=400, detail="Неверный лимит игроков")
 
     random_allowed = request.random_allowed_modes
     if request.game_mode == "random" and random_allowed is not None:
@@ -854,6 +859,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         format_mode=request.format_mode,
         play_mode=request.game_mode,
         random_allowed_modes=random_allowed or [],
+        player_limit=request.player_limit,
         timer_enabled=timer_enabled,
         turn_time_seconds=turn_time_seconds,
         current_turn_index=0,
@@ -875,13 +881,23 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
 
     room = rooms.get(request.room_code.upper())
     if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
-    if request.format_mode != room.format_mode or request.game_mode != room.play_mode:
-        raise HTTPException(status_code=400, detail="Эта комната создана в другом режиме")
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    if room.format_mode != "online":
+        raise HTTPException(status_code=400, detail="Эта комната доступна только в онлайн-режиме")
+    if request.format_mode and request.format_mode != "online":
+        raise HTTPException(status_code=400, detail="Эта комната доступна только в онлайн-режиме")
+    if request.game_mode and request.game_mode != room.play_mode:
+        logger.info(
+            "room_join ignored mismatched game_mode request=%s room=%s code=%s user=%s",
+            request.game_mode,
+            room.play_mode,
+            room.room_code,
+            user_id,
+        )
     if room.state != "waiting":
-        raise HTTPException(status_code=400, detail="Game already started")
-    if len(room.players) >= MAX_PLAYERS:
-        raise HTTPException(status_code=400, detail="Room is full")
+        raise HTTPException(status_code=400, detail="Игра уже началась")
+    if user_id not in room.players and len(room.players) >= room.player_limit:
+        raise HTTPException(status_code=400, detail="Комната заполнена")
 
     if user_id not in room.players:
         entry = build_player_entry(user, len(room.players) + 1)
@@ -1101,6 +1117,7 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
             for entry in room.players.values()
         ],
         player_count=len(room.players),
+        player_limit=room.player_limit,
         state=room.state,
         can_start=(room.owner_user_id == user_id and room.state == "waiting" and len(room.players) >= MIN_PLAYERS),
         you_are_owner=(room.owner_user_id == user_id),

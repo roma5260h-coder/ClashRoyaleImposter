@@ -9,6 +9,7 @@ export type RoomInfo = {
   play_mode: GameMode;
   players: { user_id: number; first_name?: string | null; last_name?: string | null; display_name: string }[];
   player_count: number;
+  player_limit?: number;
   state: "waiting" | "started" | "finished";
   can_start: boolean;
   you_are_owner: boolean;

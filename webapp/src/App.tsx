@@ -9,6 +9,8 @@ type Screen =
   | "format"
   | "playMode"
   | "randomInfo"
+  | "onlineMenu"
+  | "roomCreateSettings"
   | "offlinePlayers"
   | "offlinePlayer"
   | "offlineRole"
@@ -18,8 +20,6 @@ type Screen =
   | "joinRoom"
   | "room"
   | "roomRole";
-
-type RandomFlow = "offline" | "onlineCreate" | null;
 
 type OfflineTurnStatus = {
   timer_enabled: boolean;
@@ -31,6 +31,7 @@ type OfflineTurnStatus = {
 };
 
 const MIN_PLAYERS = 3;
+const MAX_PLAYERS = 12;
 const GENERIC_ERROR_MESSAGE = "Произошла ошибка, попробуйте ещё раз";
 const RANDOM_SCENARIOS = [
   { id: "all_spies", label: "Все шпионы" },
@@ -56,7 +57,7 @@ export default function App() {
   const [format, setFormat] = useState<GameFormat | null>(null);
   const [gameMode, setGameMode] = useState<GameMode | null>(null);
   const [randomAllowed, setRandomAllowed] = useState<string[]>(DEFAULT_RANDOM_ALLOWED);
-  const [randomFlow, setRandomFlow] = useState<RandomFlow>(null);
+  const [roomPlayerLimit, setRoomPlayerLimit] = useState<number>(MAX_PLAYERS);
 
   const [timerEnabled, setTimerEnabled] = useState<boolean>(false);
   const [turnTimeSeconds, setTurnTimeSeconds] = useState<number>(8);
@@ -287,7 +288,7 @@ export default function App() {
     setError(null);
     setFormat(null);
     setGameMode(null);
-    setRandomFlow(null);
+    setRoomPlayerLimit(MAX_PLAYERS);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
     clearSessionData();
@@ -299,7 +300,8 @@ export default function App() {
     setError(null);
     setFormat(nextFormat);
     setGameMode(null);
-    setRandomFlow(null);
+    setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
+    setRoomPlayerLimit(MAX_PLAYERS);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
     setScreen("playMode");
@@ -308,30 +310,32 @@ export default function App() {
   const pickStandardMode = () => {
     setError(null);
     setGameMode("standard");
-    setRandomFlow(null);
+    setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
+    setRoomPlayerLimit(MAX_PLAYERS);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
 
     if (format === "offline") {
       setPendingOfflineCount(null);
       setScreen("offlinePlayers");
+      return;
     }
+    setScreen("onlineMenu");
   };
 
   const pickRandomMode = () => {
     setError(null);
     setGameMode("random");
+    setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
+    setRoomPlayerLimit(MAX_PLAYERS);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
 
     if (format === "offline") {
-      setRandomFlow("offline");
       setScreen("randomInfo");
       return;
     }
-
-    setRandomFlow("onlineCreate");
-    setScreen("randomInfo");
+    setScreen("onlineMenu");
   };
 
   const handleStartOffline = async () => {
@@ -442,6 +446,10 @@ export default function App() {
       setError("Сначала выбери формат и режим");
       return;
     }
+    if (roomPlayerLimit < MIN_PLAYERS || roomPlayerLimit > MAX_PLAYERS) {
+      setError("Выберите корректный лимит игроков");
+      return;
+    }
     if (gameMode === "random" && randomAllowed.length < 2) {
       setError("Выберите минимум два режима");
       return;
@@ -454,6 +462,7 @@ export default function App() {
         apiConfig,
         format,
         gameMode,
+        roomPlayerLimit,
         timerEnabled,
         timerEnabled ? turnTimeSeconds : null,
         gameMode === "random" ? randomAllowed : undefined
@@ -468,7 +477,7 @@ export default function App() {
 
   const handleJoinRoom = async () => {
     if (!roomCodeInput) return;
-    if (format !== "online" || !gameMode) {
+    if (format !== "online") {
       setError("Сначала выбери формат и режим");
       return;
     }
@@ -476,8 +485,9 @@ export default function App() {
     setError(null);
 
     try {
-      const info = await api.roomJoin(apiConfig, roomCodeInput.toUpperCase(), format, gameMode);
+      const info = await api.roomJoin(apiConfig, roomCodeInput.toUpperCase());
       setRoomInfo(info);
+      setGameMode(info.play_mode);
       setRoomStarter(null);
       setScreen("room");
     } catch (err) {
@@ -548,12 +558,11 @@ export default function App() {
   };
 
   const backFromJoin = () => {
-    if (gameMode === "random") {
-      setRandomFlow("onlineCreate");
-      setScreen("randomInfo");
+    if (!gameMode) {
+      setScreen("playMode");
       return;
     }
-    setScreen("playMode");
+    setScreen("onlineMenu");
   };
 
   const renderTurnProgress = () => {
@@ -662,28 +671,13 @@ export default function App() {
                     Рандом
                   </button>
                 </div>
-
-                {format === "online" && gameMode === "standard" && (
-                  <>
-                    {renderTimerSetup()}
-                    <div className="actions stack">
-                      <button className="btn full" onClick={createRoomNow}>
-                        Создать комнату
-                      </button>
-                      <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
-                        Подключиться
-                      </button>
-                    </div>
-                  </>
-                )}
-
                 <button className="link" onClick={resetAll}>
                   Назад
                 </button>
               </div>
             )}
 
-            {screen === "randomInfo" && (
+            {screen === "randomInfo" && format === "offline" && (
               <div className="card center">
                 <div className="title">Рандом режим</div>
                 <p className="text">
@@ -717,39 +711,107 @@ export default function App() {
 
                 {randomAllowed.length < 2 && <div className="hint danger">Выберите минимум два режима</div>}
 
-                {randomFlow === "onlineCreate" && renderTimerSetup()}
-
                 <div className="actions stack">
-                  {randomFlow === "onlineCreate" ? (
-                    <>
-                      <button className="btn full" onClick={createRoomNow} disabled={randomAllowed.length < 2}>
-                        Создать комнату
-                      </button>
-                      <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
-                        Подключиться
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btn full"
-                      onClick={() => {
-                        setPendingOfflineCount(null);
-                        setScreen("offlinePlayers");
-                      }}
-                      disabled={randomAllowed.length < 2}
-                    >
-                      Продолжить
-                    </button>
-                  )}
+                  <button
+                    className="btn full"
+                    onClick={() => {
+                      setPendingOfflineCount(null);
+                      setScreen("offlinePlayers");
+                    }}
+                    disabled={randomAllowed.length < 2}
+                  >
+                    Продолжить
+                  </button>
                 </div>
 
-                <button
-                  className="link"
-                  onClick={() => {
-                    setRandomFlow(null);
-                    setScreen("playMode");
-                  }}
-                >
+                <button className="link" onClick={() => setScreen("playMode")}>
+                  Назад
+                </button>
+              </div>
+            )}
+
+            {screen === "onlineMenu" && format === "online" && gameMode && (
+              <div className="card center">
+                <div className="title">
+                  Онлайн режим: {gameMode === "standard" ? "Стандартный" : "Рандом"}
+                </div>
+                <p className="text">Выберите, что хотите сделать.</p>
+                <div className="actions stack">
+                  <button className="btn full" onClick={() => setScreen("roomCreateSettings")}>
+                    Создать комнату
+                  </button>
+                  <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
+                    Подключиться
+                  </button>
+                </div>
+                <button className="link" onClick={() => setScreen("playMode")}>
+                  Назад
+                </button>
+              </div>
+            )}
+
+            {screen === "roomCreateSettings" && format === "online" && gameMode && (
+              <div className="card center">
+                <div className="title">Настройки комнаты</div>
+                <p className="text">Выберите лимит игроков, затем дополнительные параметры.</p>
+
+                <div className="settings-block">
+                  <div className="settings-label">Лимит игроков в комнате</div>
+                  <div className="grid">
+                    {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => i + MIN_PLAYERS).map(
+                      (count) => (
+                        <button
+                          key={count}
+                          type="button"
+                          className={`btn small ${roomPlayerLimit === count ? "secondary" : ""}`}
+                          onClick={() => setRoomPlayerLimit(count)}
+                        >
+                          {count}
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {gameMode === "random" && (
+                  <div className="settings-block">
+                    <div className="settings-label">Сценарии рандома</div>
+                    <div className="randomList">
+                      {RANDOM_SCENARIOS.map((scenario) => {
+                        const checked = randomAllowed.includes(scenario.id);
+                        return (
+                          <button
+                            key={scenario.id}
+                            type="button"
+                            className={`randomItem ${checked ? "checked" : ""}`}
+                            onClick={() => {
+                              setRandomAllowed((prev) => {
+                                if (prev.includes(scenario.id)) {
+                                  return prev.filter((item) => item !== scenario.id);
+                                }
+                                return [...prev, scenario.id];
+                              });
+                            }}
+                          >
+                            <span className={`checkbox ${checked ? "checked" : ""}`} />
+                            <span className="randomLabel">{scenario.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {randomAllowed.length < 2 && <div className="hint danger">Выберите минимум два режима</div>}
+                  </div>
+                )}
+
+                {renderTimerSetup()}
+
+                <div className="actions stack">
+                  <button className="btn full" onClick={createRoomNow} disabled={gameMode === "random" && randomAllowed.length < 2}>
+                    Создать
+                  </button>
+                </div>
+
+                <button className="link" onClick={() => setScreen("onlineMenu")}>
                   Назад
                 </button>
               </div>
@@ -907,7 +969,7 @@ export default function App() {
                 />
                 <div className="actions stack">
                   <button className="btn full" onClick={handleJoinRoom}>
-                    Войти
+                    Подключиться
                   </button>
                 </div>
                 <button className="link" onClick={backFromJoin}>
@@ -922,6 +984,7 @@ export default function App() {
                   Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
                 </div>
                 <p className="text">Игроков: {roomInfo.player_count}</p>
+                <p className="text">Лимит: {roomInfo.player_limit ?? MAX_PLAYERS}</p>
 
                 <div className="players">
                   {roomInfo.players.map((player) => (

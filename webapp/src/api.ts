@@ -99,6 +99,7 @@ export const api = {
     config: ApiConfig,
     formatMode: GameFormat,
     gameMode: GameMode,
+    playerLimit: number,
     timerEnabled: boolean,
     turnTimeSeconds: number | null,
     randomAllowed?: string[]
@@ -106,16 +107,15 @@ export const api = {
     post<RoomInfo>(config, "/api/room/create", {
       format_mode: formatMode,
       game_mode: gameMode,
+      player_limit: playerLimit,
       timer_enabled: timerEnabled,
       ...(timerEnabled && turnTimeSeconds ? { turn_time_seconds: turnTimeSeconds } : {}),
       ...(randomAllowed ? { random_allowed_modes: randomAllowed } : {}),
     }),
 
-  roomJoin: (config: ApiConfig, roomCode: string, formatMode: GameFormat, gameMode: GameMode) =>
+  roomJoin: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/join", {
       room_code: roomCode,
-      format_mode: formatMode,
-      game_mode: gameMode,
     }),
 
   roomStatus: (config: ApiConfig, roomCode: string) =>
