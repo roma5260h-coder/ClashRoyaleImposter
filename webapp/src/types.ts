@@ -33,4 +33,5 @@ export type RoomInfo = {
   turn_started_at?: number | null;
   turns_completed?: boolean;
   status_message?: string | null;
+  can_manage_bots?: boolean;
 };

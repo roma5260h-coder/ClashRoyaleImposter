@@ -275,6 +275,7 @@ class RoomInfo(BaseModel):
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
     status_message: Optional[str] = None
+    can_manage_bots: bool = False
 
 
 class RoomStartResponse(BaseModel):
@@ -1153,6 +1154,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     if request.format_mode != "online":
         raise HTTPException(status_code=400, detail="Invalid format mode")
@@ -1196,7 +1198,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
     rooms[room_code] = room
     debug_room_storage("create", room_code, room_code)
 
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/join", response_model=RoomInfo)
@@ -1204,6 +1206,7 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     raw_room_code = request.room_code
     room_code = normalizeRoomCode(raw_room_code)
@@ -1240,7 +1243,7 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     touch_room_user(room, user_id)
     debug_room_storage("join:success", raw_room_code, room_code)
 
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/bots/add", response_model=RoomInfo)
@@ -1272,7 +1275,7 @@ async def room_bots_add(request: RoomBotsAddRequest) -> RoomInfo:
             len(room.players),
             room.player_limit,
         )
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/bots/fill", response_model=RoomInfo)
@@ -1304,7 +1307,7 @@ async def room_bots_fill(request: RoomActionRequest) -> RoomInfo:
             len(room.players),
             room.player_limit,
         )
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/bots/clear", response_model=RoomInfo)
@@ -1336,7 +1339,7 @@ async def room_bots_clear(request: RoomActionRequest) -> RoomInfo:
             len(room.players),
             room.player_limit,
         )
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/status", response_model=RoomInfo)
@@ -1344,6 +1347,7 @@ async def room_status(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
@@ -1356,7 +1360,7 @@ async def room_status(request: RoomActionRequest) -> RoomInfo:
         rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
 
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/start", response_model=RoomStartResponse)
@@ -1506,6 +1510,7 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
@@ -1535,7 +1540,7 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     if room.turn_started_at is None:
         room.turn_started_at = time.time()
 
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/turn/finish", response_model=RoomInfo)
@@ -1543,6 +1548,7 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
@@ -1565,7 +1571,7 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
     room.turn_active = False
     room.turn_started_at = None
     room.turns_completed = True
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/resume", response_model=RoomInfo)
@@ -1573,6 +1579,7 @@ async def room_resume(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
@@ -1594,7 +1601,7 @@ async def room_resume(request: RoomActionRequest) -> RoomInfo:
         room.turn_active = True
         room.turn_started_at = time.time()
     set_room_status_message(room, "Игра продолжена")
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/heartbeat", response_model=RoomInfo)
@@ -1602,6 +1609,7 @@ async def room_heartbeat(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
@@ -1614,7 +1622,7 @@ async def room_heartbeat(request: RoomActionRequest) -> RoomInfo:
     if drop_stale_room_players(room):
         rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
-    return room_to_info(room, user_id)
+    return room_to_info(room, user_id, username)
 
 
 @app.post("/api/room/leave", response_model=RoomLeaveResponse)
@@ -1665,7 +1673,7 @@ def card_image(name: str) -> Response:
     )
 
 
-def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
+def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None) -> RoomInfo:
     advance_room_turn(room)
     room.turns_completed = room.turn_state == TURN_STATE_FINISHED
     starter_name = None
@@ -1714,6 +1722,12 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         turn_started_at=room.turn_started_at,
         turns_completed=room.turns_completed,
         status_message=room.last_status_message,
+        can_manage_bots=(
+            DEV_TOOLS_ENABLED
+            and room.state == ROOM_STATE_WAITING
+            and room.owner_user_id == user_id
+            and is_dev_admin(user_id, username)
+        ),
     )
 
 

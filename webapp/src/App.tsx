@@ -45,19 +45,6 @@ const RANDOM_SCENARIOS = [
 
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
 const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
-const DEV_APP_MODE =
-  import.meta.env.DEV ||
-  import.meta.env.MODE !== "production" ||
-  import.meta.env.VITE_APP_ENV === "dev" ||
-  import.meta.env.VITE_APP_ENV === "development";
-const DEV_ADMIN_IDS = String(import.meta.env.VITE_DEV_ADMIN_IDS ?? "")
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean);
-const DEV_ADMIN_USERNAMES = String(import.meta.env.VITE_DEV_ADMIN_USERNAMES ?? "")
-  .split(",")
-  .map((value) => value.trim().replace(/^@+/, "").toLowerCase())
-  .filter(Boolean);
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
@@ -72,10 +59,6 @@ function normalizeRoomCode(code: string): string {
     .replace(/\s+/g, "")
     .replace(/[^0-9a-zA-Z]/g, "")
     .toUpperCase();
-}
-
-function normalizeTelegramUsername(value: string): string {
-  return (value ?? "").trim().replace(/^@+/, "").toLowerCase();
 }
 
 export default function App() {
@@ -124,12 +107,6 @@ export default function App() {
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
-  const telegramUserId = String(tg?.initDataUnsafe?.user?.id ?? "").trim();
-  const telegramUsername = normalizeTelegramUsername(String(tg?.initDataUnsafe?.user?.username ?? ""));
-  const isDevAdminUser = DEV_APP_MODE && (
-    (telegramUserId.length > 0 && DEV_ADMIN_IDS.includes(telegramUserId)) ||
-    (telegramUsername.length > 0 && DEV_ADMIN_USERNAMES.includes(telegramUsername))
-  );
 
   const resolveImageUrl = (url: string) => {
     if (/^https?:\/\//i.test(url)) return url;
@@ -143,8 +120,7 @@ export default function App() {
     roomInfo &&
       screen === "room" &&
       roomInfo.you_are_owner &&
-      isDevAdminUser &&
-      DEV_APP_MODE
+      roomInfo.can_manage_bots
   );
 
   const renderPlayerName = (player: RoomPlayer) => {

@@ -73,14 +73,12 @@ cd /Users/nikita/Desktop/ClashRoyalBot/webapp
 npm install
 cat > .env <<'EOF'
 VITE_API_BASE=http://localhost:8000
-VITE_APP_ENV=dev
-VITE_DEV_ADMIN_IDS=123456789
-VITE_DEV_ADMIN_USERNAMES=gerafen
 EOF
 npm run dev
 ```
 
 Открой `http://localhost:5173` в браузере. Для Telegram нужен HTTPS.
+DEV доступ к скрытому меню определяется backend (по `DEV_TOOLS_ENABLED` + `DEV_ADMIN_IDS`/`DEV_ADMIN_USERNAMES`), фронтенду отдельные DEV admin переменные не нужны.
 
 ## 🤖 Запуск бота
 
