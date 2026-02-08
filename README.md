@@ -42,11 +42,12 @@ ROOM_DEBUG=0
 APP_ENV=production
 DEV_TOOLS_ENABLED=0
 DEV_ADMIN_IDS=123456789
+DEV_ADMIN_USERNAMES=gerafen
 ```
 
 `INIT_DATA_BYPASS=1` — только для локальной разработки, отключает проверку подписи initData.
 `ROOM_DEBUG=1` или `APP_ENV=dev` — включает диагностические логи create/join по комнатам.
-`DEV_TOOLS_ENABLED=1` + `DEV_ADMIN_IDS` — включает DEV endpoints для добавления/очистки ботов в лобби (только хост и только для указанных Telegram ID).
+`DEV_TOOLS_ENABLED=1` + `DEV_ADMIN_IDS`/`DEV_ADMIN_USERNAMES` — включает DEV endpoints для добавления/очистки ботов в лобби (только хост и только для указанных Telegram ID/username).
 
 ## 🚀 Запуск backend
 
@@ -74,6 +75,7 @@ cat > .env <<'EOF'
 VITE_API_BASE=http://localhost:8000
 VITE_APP_ENV=dev
 VITE_DEV_ADMIN_IDS=123456789
+VITE_DEV_ADMIN_USERNAMES=gerafen
 EOF
 npm run dev
 ```

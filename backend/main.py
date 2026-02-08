@@ -86,6 +86,33 @@ def parse_dev_admin_ids() -> Set[int]:
 
 
 DEV_ADMIN_IDS = parse_dev_admin_ids()
+
+
+def normalize_tg_username(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().lstrip("@").lower()
+    return normalized or None
+
+
+def parse_dev_admin_usernames() -> Set[str]:
+    raw_values = ",".join(
+        value
+        for value in [
+            os.getenv("DEV_ADMIN_USERNAMES", ""),
+            os.getenv("DEV_ADMIN_TG_USERNAME", ""),
+        ]
+        if value
+    )
+    usernames: Set[str] = set()
+    for chunk in raw_values.split(","):
+        normalized = normalize_tg_username(chunk)
+        if normalized:
+            usernames.add(normalized)
+    return usernames
+
+
+DEV_ADMIN_USERNAMES = parse_dev_admin_usernames()
 PlayerId = Union[int, str]
 
 app = FastAPI(title="Spy Game API")
@@ -622,18 +649,23 @@ def drop_stale_room_players(room: RoomSession) -> bool:
     return len(room.players) == 0 or len(real_room_player_ids(room)) == 0
 
 
-def is_dev_admin(user_id: int) -> bool:
-    return user_id in DEV_ADMIN_IDS
+def is_dev_admin(user_id: int, username: Optional[str]) -> bool:
+    if user_id in DEV_ADMIN_IDS:
+        return True
+    normalized_username = normalize_tg_username(username)
+    if normalized_username and normalized_username in DEV_ADMIN_USERNAMES:
+        return True
+    return False
 
 
-def ensure_room_dev_bot_access(room: RoomSession, user_id: int) -> None:
+def ensure_room_dev_bot_access(room: RoomSession, user_id: int, username: Optional[str]) -> None:
     if not DEV_TOOLS_ENABLED:
         raise HTTPException(status_code=404, detail="Not found")
     if user_id not in room.players:
         raise HTTPException(status_code=403, detail="Вы не в комнате")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Только хост может управлять ботами")
-    if not is_dev_admin(user_id):
+    if not is_dev_admin(user_id, username):
         raise HTTPException(status_code=403, detail="DEV доступ запрещён")
 
 
@@ -1216,12 +1248,13 @@ async def room_bots_add(request: RoomBotsAddRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Комната не найдена")
-    ensure_room_dev_bot_access(room, user_id)
+    ensure_room_dev_bot_access(room, user_id, username)
     if room.state != ROOM_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Добавлять ботов можно только до старта игры")
 
@@ -1247,12 +1280,13 @@ async def room_bots_fill(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Комната не найдена")
-    ensure_room_dev_bot_access(room, user_id)
+    ensure_room_dev_bot_access(room, user_id, username)
     if room.state != ROOM_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Добавлять ботов можно только до старта игры")
 
@@ -1278,12 +1312,13 @@ async def room_bots_clear(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
 
     room_code = normalizeRoomCode(request.room_code)
     room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Комната не найдена")
-    ensure_room_dev_bot_access(room, user_id)
+    ensure_room_dev_bot_access(room, user_id, username)
     if room.state != ROOM_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Удалять ботов можно только до старта игры")
 
