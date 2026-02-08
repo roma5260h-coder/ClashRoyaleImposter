@@ -13,6 +13,10 @@ export type RoomInfo = {
   can_start: boolean;
   you_are_owner: boolean;
   starter_name?: string | null;
-  discussion_time_seconds?: number | null;
-  discussion_started_at?: number | null;
+  timer_enabled?: boolean;
+  turn_time_seconds?: number | null;
+  current_turn_index?: number;
+  current_turn_name?: string | null;
+  turn_started_at?: number | null;
+  turns_completed?: boolean;
 };

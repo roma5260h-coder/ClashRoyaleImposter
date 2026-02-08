@@ -311,6 +311,35 @@ body {
   gap: 12px;
 }
 
+.timer-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(10, 15, 29, 0.55);
+  padding: 12px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.timer-setup-label {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 .timer-setup-value {
   font-size: 22px;
   font-weight: 700;
@@ -385,7 +414,17 @@ body {
 .timer-fill {
   height: 100%;
   background: linear-gradient(90deg, #ffd166 0%, #ff9f1c 100%);
-  transition: width 0.25s linear;
+  transition: width 0.1s linear;
+}
+
+.turn-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(10, 15, 29, 0.55);
+  padding: 12px;
 }
 
 

@@ -13,9 +13,9 @@ async function post<T>(config: ApiConfig, path: string, body: Record<string, unk
   });
 
   if (!res.ok) {
-    let message = "Ошибка запроса";
+    let message = "Произошла ошибка, попробуйте ещё раз";
     const text = await res.text();
-    if (text) {
+    if (text && res.status < 500) {
       try {
         const data = JSON.parse(text);
         if (data?.detail) {
@@ -39,16 +39,18 @@ export const api = {
     config: ApiConfig,
     gameMode: GameMode,
     playerCount: number,
-    discussionTimeSeconds: number,
+    timerEnabled: boolean,
+    turnTimeSeconds: number | null,
     randomAllowed?: string[]
   ) =>
-    post<{ session_id: string; current_player_number: number; player_count: number; discussion_time_seconds: number }>(
+    post<{ session_id: string; current_player_number: number; player_count: number; timer_enabled: boolean; turn_time_seconds?: number | null }>(
       config,
       "/api/offline/start",
       {
         game_mode: gameMode,
         player_count: playerCount,
-        discussion_time_seconds: discussionTimeSeconds,
+        timer_enabled: timerEnabled,
+        ...(timerEnabled && turnTimeSeconds ? { turn_time_seconds: turnTimeSeconds } : {}),
         ...(randomAllowed ? { random_allowed_modes: randomAllowed } : {}),
       }
     ),
@@ -67,23 +69,45 @@ export const api = {
       { session_id: sessionId }
     ),
   offlineRestart: (config: ApiConfig, sessionId: string) =>
-    post<{ session_id: string; current_player_number: number; player_count: number }>(
+    post<{ session_id: string; current_player_number: number; player_count: number; timer_enabled: boolean; turn_time_seconds?: number | null }>(
       config,
       "/api/offline/restart",
       { session_id: sessionId }
     ),
 
+  offlineTurnStatus: (config: ApiConfig, sessionId: string) =>
+    post<{
+      timer_enabled: boolean;
+      turn_time_seconds?: number | null;
+      current_turn_index: number;
+      current_player_number: number;
+      turn_started_at?: number | null;
+      turns_completed: boolean;
+    }>(config, "/api/offline/turn/status", { session_id: sessionId }),
+
+  offlineTurnStart: (config: ApiConfig, sessionId: string) =>
+    post<{
+      timer_enabled: boolean;
+      turn_time_seconds?: number | null;
+      current_turn_index: number;
+      current_player_number: number;
+      turn_started_at?: number | null;
+      turns_completed: boolean;
+    }>(config, "/api/offline/turn/start", { session_id: sessionId }),
+
   roomCreate: (
     config: ApiConfig,
     formatMode: GameFormat,
     gameMode: GameMode,
-    discussionTimeSeconds: number,
+    timerEnabled: boolean,
+    turnTimeSeconds: number | null,
     randomAllowed?: string[]
   ) =>
     post<RoomInfo>(config, "/api/room/create", {
       format_mode: formatMode,
       game_mode: gameMode,
-      discussion_time_seconds: discussionTimeSeconds,
+      timer_enabled: timerEnabled,
+      ...(timerEnabled && turnTimeSeconds ? { turn_time_seconds: turnTimeSeconds } : {}),
       ...(randomAllowed ? { random_allowed_modes: randomAllowed } : {}),
     }),
 
@@ -109,6 +133,9 @@ export const api = {
       "/api/room/restart",
       { room_code: roomCode }
     ),
+
+  roomTurnStart: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/turn/start", { room_code: roomCode }),
 
   roomRole: (config: ApiConfig, roomCode: string) =>
     post<{ role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(

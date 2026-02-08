@@ -9,17 +9,29 @@ type Screen =
   | "format"
   | "playMode"
   | "randomInfo"
-  | "timerSetup"
   | "offlinePlayers"
   | "offlinePlayer"
   | "offlineRole"
   | "offlineNext"
   | "offlineFinished"
-  | "onlineMenu"
+  | "offlineTurn"
   | "joinRoom"
   | "room"
   | "roomRole";
 
+type RandomFlow = "offline" | "onlineCreate" | null;
+
+type OfflineTurnStatus = {
+  timer_enabled: boolean;
+  turn_time_seconds?: number | null;
+  current_turn_index: number;
+  current_player_number: number;
+  turn_started_at?: number | null;
+  turns_completed: boolean;
+};
+
+const MIN_PLAYERS = 3;
+const GENERIC_ERROR_MESSAGE = "Произошла ошибка, попробуйте ещё раз";
 const RANDOM_SCENARIOS = [
   { id: "all_spies", label: "Все шпионы" },
   { id: "same_card", label: "У всех одна карта" },
@@ -27,35 +39,58 @@ const RANDOM_SCENARIOS = [
   { id: "multi_spy", label: "Несколько шпионов" },
 ];
 
+const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
+
+function toUserError(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
   const [format, setFormat] = useState<GameFormat | null>(null);
   const [gameMode, setGameMode] = useState<GameMode | null>(null);
-  const [randomAllowed, setRandomAllowed] = useState<string[]>(() => RANDOM_SCENARIOS.map((s) => s.id));
-  const [randomFlow, setRandomFlow] = useState<"offline" | "onlineCreate" | null>(null);
-  const [discussionTime, setDiscussionTime] = useState<number>(25);
-  const [timerContext, setTimerContext] = useState<"offline" | "onlineCreateStandard" | "onlineCreateRandom" | null>(null);
-  const [pendingOfflineCount, setPendingOfflineCount] = useState<number | null>(null);
+  const [randomAllowed, setRandomAllowed] = useState<string[]>(DEFAULT_RANDOM_ALLOWED);
+  const [randomFlow, setRandomFlow] = useState<RandomFlow>(null);
 
+  const [timerEnabled, setTimerEnabled] = useState<boolean>(false);
+  const [turnTimeSeconds, setTurnTimeSeconds] = useState<number>(8);
+
+  const [pendingOfflineCount, setPendingOfflineCount] = useState<number | null>(null);
   const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
+  const [offlineTimerEnabled, setOfflineTimerEnabled] = useState<boolean>(false);
   const [currentPlayer, setCurrentPlayer] = useState<number>(1);
-  const [offlineRole, setOfflineRole] = useState<{ role: string; card?: string; image_url?: string; elixir_cost?: number | null } | null>(null);
+  const [offlineRole, setOfflineRole] = useState<{
+    role: string;
+    card?: string;
+    image_url?: string;
+    elixir_cost?: number | null;
+  } | null>(null);
   const [offlineImageOk, setOfflineImageOk] = useState<boolean>(true);
   const [starterPlayer, setStarterPlayer] = useState<number | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [offlineTurn, setOfflineTurn] = useState<OfflineTurnStatus | null>(null);
 
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState<string>("");
-  const [roomRole, setRoomRole] = useState<{ role: string; card?: string; image_url?: string; elixir_cost?: number | null } | null>(null);
+  const [roomRole, setRoomRole] = useState<{
+    role: string;
+    card?: string;
+    image_url?: string;
+    elixir_cost?: number | null;
+  } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
-  const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null);
-  const [timerTotal, setTimerTotal] = useState<number | null>(null);
-  const [timerRemaining, setTimerRemaining] = useState<number | null>(null);
+
+  const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
+
   const resolveImageUrl = (url: string) => {
     if (/^https?:\/\//i.test(url)) return url;
     if (!apiBase) return url;
@@ -63,10 +98,7 @@ export default function App() {
     return `${trimmed}${url.startsWith("/") ? "" : "/"}${url}`;
   };
 
-  const apiConfig: ApiConfig = useMemo(
-    () => ({ baseUrl: apiBase, initData }),
-    [apiBase, initData]
-  );
+  const apiConfig: ApiConfig = useMemo(() => ({ baseUrl: apiBase, initData }), [apiBase, initData]);
 
   useEffect(() => {
     tg?.ready?.();
@@ -75,23 +107,23 @@ export default function App() {
     if (initData) return;
 
     let attempts = 0;
-    const timer = setInterval(() => {
+    const interval = setInterval(() => {
       const freshInitData = tg?.initData ?? "";
       if (freshInitData) {
         setError(null);
         setInitData(freshInitData);
-        clearInterval(timer);
+        clearInterval(interval);
         return;
       }
       attempts += 1;
       if (attempts >= 5) {
-        clearInterval(timer);
+        clearInterval(interval);
         setError("Не удалось получить имя из Telegram. Открой мини‑приложение из Telegram.");
         setScreen("format");
       }
     }, 200);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, [initData]);
 
   useEffect(() => {
@@ -100,37 +132,75 @@ export default function App() {
       .auth(apiConfig)
       .then(() => setScreen("format"))
       .catch((err) => {
-        setError(err.message || "Не удалось подтвердить Telegram");
+        setError(toUserError(err, "Не удалось подтвердить Telegram"));
         setScreen("format");
       });
   }, [apiConfig, initData]);
 
   useEffect(() => {
     if (screen === "randomInfo") {
-      setRandomAllowed(RANDOM_SCENARIOS.map((s) => s.id));
+      setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
     }
   }, [screen]);
 
   useEffect(() => {
+    if (!timerEnabled) {
+      setTurnTimeSeconds(8);
+    }
+  }, [timerEnabled]);
+
+  useEffect(() => {
     if (screen !== "room" || !roomInfo) return;
 
-    const interval = setInterval(() => {
-      api
-        .roomStatus(apiConfig, roomInfo.room_code)
-        .then((info) => {
-          setRoomInfo(info);
-          if (info.state === "started") {
-            const starter = info.starter_name
-              ? `Игру начинает: ${info.starter_name}`
-              : "Игра началась";
-            setRoomStarter((prev) => prev ?? starter);
-          }
-        })
-        .catch(() => null);
-    }, 3000);
+    let canceled = false;
+    const poll = async () => {
+      try {
+        const info = await api.roomStatus(apiConfig, roomInfo.room_code);
+        if (canceled) return;
+        setRoomInfo(info);
+        if (info.state === "started") {
+          const starter = info.starter_name ? `Игру начинает: ${info.starter_name}` : "Игра началась";
+          setRoomStarter((prev) => prev ?? starter);
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    };
 
-    return () => clearInterval(interval);
-  }, [screen, roomInfo, apiConfig]);
+    poll();
+    const interval = setInterval(poll, 1000);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+    };
+  }, [apiConfig, roomInfo?.room_code, screen]);
+
+  useEffect(() => {
+    if (screen !== "offlineTurn" || !offlineSessionId || !offlineTimerEnabled || offlineTurn?.turns_completed) {
+      return;
+    }
+
+    let canceled = false;
+    const poll = async () => {
+      try {
+        const info = await api.offlineTurnStatus(apiConfig, offlineSessionId);
+        if (!canceled) {
+          setOfflineTurn(info);
+        }
+      } catch (err) {
+        if (!canceled) {
+          setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+        }
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 700);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+    };
+  }, [apiConfig, offlineSessionId, offlineTimerEnabled, offlineTurn?.turns_completed, screen]);
 
   useEffect(() => {
     setOfflineImageOk(true);
@@ -140,239 +210,209 @@ export default function App() {
     setRoomImageOk(true);
   }, [roomRole?.image_url, roomRole?.role]);
 
-  const startTimer = (totalSeconds: number, startedAtMs?: number) => {
-    const startAt = startedAtMs ?? Date.now();
-    setTimerTotal(totalSeconds);
-    setTimerEndsAt(startAt + totalSeconds * 1000);
-  };
+  const activeTurn = useMemo(() => {
+    if (screen === "offlineTurn" && offlineTurn?.timer_enabled && !offlineTurn.turns_completed) {
+      return {
+        startedAt: offlineTurn.turn_started_at ?? null,
+        durationSeconds: offlineTurn.turn_time_seconds ?? null,
+        turnsCompleted: offlineTurn.turns_completed,
+      };
+    }
+
+    if (
+      screen === "room" &&
+      roomInfo?.state === "started" &&
+      roomInfo.timer_enabled &&
+      !roomInfo.turns_completed
+    ) {
+      return {
+        startedAt: roomInfo.turn_started_at ?? null,
+        durationSeconds: roomInfo.turn_time_seconds ?? null,
+        turnsCompleted: roomInfo.turns_completed ?? false,
+      };
+    }
+
+    return null;
+  }, [offlineTurn, roomInfo, screen]);
 
   useEffect(() => {
-    if (!timerEndsAt || !timerTotal) {
-      setTimerRemaining(null);
+    if (!activeTurn || activeTurn.turnsCompleted) {
+      setTurnRemainingMs(null);
       return;
     }
-    const tick = () => {
-      const msLeft = timerEndsAt - Date.now();
-      const secondsLeft = Math.max(0, Math.ceil(msLeft / 1000));
-      setTimerRemaining(secondsLeft);
-    };
-    tick();
-    const interval = setInterval(tick, 250);
-    return () => clearInterval(interval);
-  }, [timerEndsAt, timerTotal]);
-
-  useEffect(() => {
-    if (!roomInfo || roomInfo.state !== "started") return;
-    const total = roomInfo.discussion_time_seconds ?? 25;
-    if (!roomInfo.discussion_started_at) return;
-    const endAt = roomInfo.discussion_started_at * 1000 + total * 1000;
-    if (timerEndsAt !== endAt) {
-      setTimerTotal(total);
-      setTimerEndsAt(endAt);
+    const startedAt = activeTurn.startedAt;
+    const durationSeconds = activeTurn.durationSeconds;
+    if (!startedAt || !durationSeconds) {
+      setTurnRemainingMs(null);
+      return;
     }
-  }, [roomInfo?.state, roomInfo?.discussion_started_at, roomInfo?.discussion_time_seconds, timerEndsAt]);
 
-  const resetAll = () => {
-    setFormat(null);
-    setGameMode(null);
-    setRandomFlow(null);
-    setDiscussionTime(25);
-    setTimerContext(null);
+    const tick = () => {
+      const endAtMs = startedAt * 1000 + durationSeconds * 1000;
+      const msLeft = Math.max(0, endAtMs - Date.now());
+      setTurnRemainingMs(msLeft);
+    };
+
+    tick();
+    const interval = setInterval(tick, 100);
+    return () => clearInterval(interval);
+  }, [activeTurn?.durationSeconds, activeTurn?.startedAt, activeTurn?.turnsCompleted]);
+
+  const timerTotalMs = activeTurn?.durationSeconds ? activeTurn.durationSeconds * 1000 : null;
+  const timerActive = Boolean(
+    timerTotalMs && turnRemainingMs !== null && activeTurn?.startedAt && !activeTurn.turnsCompleted
+  );
+  const timerProgress =
+    timerActive && timerTotalMs
+      ? Math.max(0, Math.min(100, ((turnRemainingMs ?? 0) / timerTotalMs) * 100))
+      : 0;
+  const timerSecondsLeft = turnRemainingMs === null ? null : Math.max(0, Math.ceil(turnRemainingMs / 1000));
+
+  const clearSessionData = () => {
     setPendingOfflineCount(null);
     setOfflineSessionId(null);
+    setOfflineTimerEnabled(false);
     setOfflineRole(null);
     setStarterPlayer(null);
+    setOfflineTurn(null);
     setRoomInfo(null);
     setRoomRole(null);
     setRoomStarter(null);
     setRoomCodeInput("");
     setStatus(null);
-    setTimerEndsAt(null);
-    setTimerTotal(null);
-    setTimerRemaining(null);
+    setTurnRemainingMs(null);
+  };
+
+  const resetAll = () => {
+    setError(null);
+    setFormat(null);
+    setGameMode(null);
+    setRandomFlow(null);
+    setTimerEnabled(false);
+    setTurnTimeSeconds(8);
+    clearSessionData();
     setScreen("format");
   };
 
-  const proceedAfterMode = () => {
+  const pickFormat = (nextFormat: GameFormat) => {
+    clearSessionData();
+    setError(null);
+    setFormat(nextFormat);
+    setGameMode(null);
+    setRandomFlow(null);
+    setTimerEnabled(false);
+    setTurnTimeSeconds(8);
+    setScreen("playMode");
+  };
+
+  const pickStandardMode = () => {
+    setError(null);
+    setGameMode("standard");
+    setRandomFlow(null);
+    setTimerEnabled(false);
+    setTurnTimeSeconds(8);
+
     if (format === "offline") {
+      setPendingOfflineCount(null);
       setScreen("offlinePlayers");
-    } else {
-      setScreen("onlineMenu");
     }
   };
 
-  const handleStartOffline = async (count: number) => {
-    if (!gameMode) return;
+  const pickRandomMode = () => {
     setError(null);
+    setGameMode("random");
+    setTimerEnabled(false);
+    setTurnTimeSeconds(8);
+
+    if (format === "offline") {
+      setRandomFlow("offline");
+      setScreen("randomInfo");
+      return;
+    }
+
+    setRandomFlow("onlineCreate");
+    setScreen("randomInfo");
+  };
+
+  const handleStartOffline = async () => {
+    if (!gameMode || !pendingOfflineCount) return;
+    setError(null);
+
     try {
       const res = await api.offlineStart(
         apiConfig,
         gameMode,
-        count,
-        discussionTime,
+        pendingOfflineCount,
+        timerEnabled,
+        timerEnabled ? turnTimeSeconds : null,
         gameMode === "random" ? randomAllowed : undefined
       );
       setOfflineSessionId(res.session_id);
+      setOfflineTimerEnabled(res.timer_enabled);
       setCurrentPlayer(res.current_player_number);
+      setOfflineTurn(null);
       setScreen("offlinePlayer");
-    } catch (err: any) {
-      setError(err.message || "Не удалось начать игру");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось начать игру"));
     }
-  };
-
-  const openTimerForOffline = (count: number) => {
-    setPendingOfflineCount(count);
-    setTimerContext("offline");
-    setScreen("timerSetup");
-  };
-
-  const openTimerForOnline = (fromRandom: boolean) => {
-    setTimerContext(fromRandom ? "onlineCreateRandom" : "onlineCreateStandard");
-    setScreen("timerSetup");
   };
 
   const handleReveal = async () => {
     if (!offlineSessionId) return;
     setError(null);
+
     try {
       const res = await api.offlineReveal(apiConfig, offlineSessionId);
-      console.debug("offline role payload", res);
-      setOfflineRole({ role: res.role, card: res.card, image_url: res.image_url, elixir_cost: res.elixir_cost });
+      setOfflineRole({
+        role: res.role,
+        card: res.card,
+        image_url: res.image_url,
+        elixir_cost: res.elixir_cost,
+      });
       setScreen("offlineRole");
-    } catch (err: any) {
-      setError(err.message || "Не удалось показать роль");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось показать роль"));
     }
   };
 
-  const handleTimerBack = () => {
-    if (timerContext === "offline") {
-      setScreen("offlinePlayers");
-      return;
-    }
-    if (timerContext === "onlineCreateStandard") {
-      setScreen("onlineMenu");
-      return;
-    }
-    if (timerContext === "onlineCreateRandom") {
-      setScreen("randomInfo");
-      return;
-    }
-    setScreen("playMode");
-  };
-
-  const handleClose = async () => {
+  const handleCloseRole = async () => {
     if (!offlineSessionId) return;
     setError(null);
+
     try {
       const res = await api.offlineClose(apiConfig, offlineSessionId);
-      if (res.finished) {
-        setStarterPlayer(res.starter_player_number ?? null);
-        startTimer(discussionTime);
-        setScreen("offlineFinished");
-      } else if (res.current_player_number) {
-        setCurrentPlayer(res.current_player_number);
+      if (!res.finished) {
+        if (res.current_player_number) {
+          setCurrentPlayer(res.current_player_number);
+        }
         setScreen("offlineNext");
+        return;
       }
-    } catch (err: any) {
-      setError(err.message || "Не удалось продолжить");
+
+      setStarterPlayer(res.starter_player_number ?? null);
+
+      if (offlineTimerEnabled) {
+        const turn = await api.offlineTurnStatus(apiConfig, offlineSessionId);
+        setOfflineTurn(turn);
+        setScreen("offlineTurn");
+        return;
+      }
+
+      setScreen("offlineFinished");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось продолжить"));
     }
   };
 
-  const createRoomNow = async () => {
-    if (!gameMode || format !== "online") {
-      setError("Сначала выбери формат и режим");
-      return;
-    }
+  const handleStartOfflineTurn = async () => {
+    if (!offlineSessionId) return;
     setError(null);
+
     try {
-      const info = await api.roomCreate(
-        apiConfig,
-        format,
-        gameMode,
-        discussionTime,
-        gameMode === "random" ? randomAllowed : undefined
-      );
-      setRoomInfo(info);
-      setFormat(info.format_mode);
-      setGameMode(info.play_mode);
-      setScreen("room");
-    } catch (err: any) {
-      setError(err.message || "Не удалось создать комнату");
-    }
-  };
-
-  const handleCreateRoom = async () => {
-    if (gameMode === "random") {
-      setRandomFlow("onlineCreate");
-      setScreen("randomInfo");
-      return;
-    }
-    openTimerForOnline(false);
-  };
-
-  const handleTimerContinue = async () => {
-    if (timerContext === "offline") {
-      if (!pendingOfflineCount) return;
-      const count = pendingOfflineCount;
-      setTimerContext(null);
-      setPendingOfflineCount(null);
-      await handleStartOffline(count);
-      return;
-    }
-    if (timerContext === "onlineCreateStandard" || timerContext === "onlineCreateRandom") {
-      setTimerContext(null);
-      await createRoomNow();
-    }
-  };
-
-  const handleJoinRoom = async () => {
-    if (!roomCodeInput) return;
-    if (!gameMode || format !== "online") {
-      setError("Сначала выбери формат и режим");
-      return;
-    }
-    setError(null);
-    try {
-      const info = await api.roomJoin(apiConfig, roomCodeInput.toUpperCase(), format, gameMode);
-      setRoomInfo(info);
-      setFormat(info.format_mode);
-      setGameMode(info.play_mode);
-      setScreen("room");
-    } catch (err: any) {
-      setError(err.message || "Не удалось подключиться");
-    }
-  };
-
-  const handleStartRoom = async () => {
-    if (!roomInfo) return;
-    setError(null);
-    setStatus(null);
-    try {
-      const res = await api.roomStart(apiConfig, roomInfo.room_code);
-      setRoomStarter(`Игру начинает: ${res.starter_name}`);
-      const info = await api.roomStatus(apiConfig, roomInfo.room_code);
-      setRoomInfo(info);
-    } catch (err: any) {
-      setError(err.message || "Не удалось начать игру");
-    }
-  };
-
-  const handleRestartRoom = async () => {
-    if (!roomInfo) return;
-    setError(null);
-    setStatus("Новая игра начинается…");
-    try {
-      setTimerEndsAt(null);
-      setTimerTotal(null);
-      setTimerRemaining(null);
-      const res = await api.roomRestart(apiConfig, roomInfo.room_code);
-      setRoomStarter(`Игру начинает: ${res.starter_name}`);
-      const info = await api.roomStatus(apiConfig, roomInfo.room_code);
-      setRoomInfo(info);
-      setStatus(null);
-    } catch (err: any) {
-      setStatus(null);
-      setError(err.message || "Не удалось перезапустить игру");
+      const turn = await api.offlineTurnStart(apiConfig, offlineSessionId);
+      setOfflineTurn(turn);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
     }
   };
 
@@ -380,53 +420,153 @@ export default function App() {
     if (!offlineSessionId) return;
     setError(null);
     setStatus("Новая игра начинается…");
+
     try {
-      setTimerEndsAt(null);
-      setTimerTotal(null);
-      setTimerRemaining(null);
       const res = await api.offlineRestart(apiConfig, offlineSessionId);
       setOfflineSessionId(res.session_id);
+      setOfflineTimerEnabled(res.timer_enabled);
       setCurrentPlayer(res.current_player_number);
       setOfflineRole(null);
       setStarterPlayer(null);
+      setOfflineTurn(null);
       setStatus(null);
       setScreen("offlinePlayer");
-    } catch (err: any) {
+    } catch (err) {
       setStatus(null);
-      setError(err.message || "Не удалось перезапустить игру");
+      setError(toUserError(err, "Не удалось перезапустить игру"));
+    }
+  };
+
+  const createRoomNow = async () => {
+    if (format !== "online" || !gameMode) {
+      setError("Сначала выбери формат и режим");
+      return;
+    }
+    if (gameMode === "random" && randomAllowed.length < 2) {
+      setError("Выберите минимум два режима");
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const info = await api.roomCreate(
+        apiConfig,
+        format,
+        gameMode,
+        timerEnabled,
+        timerEnabled ? turnTimeSeconds : null,
+        gameMode === "random" ? randomAllowed : undefined
+      );
+      setRoomInfo(info);
+      setRoomStarter(null);
+      setScreen("room");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось создать комнату"));
+    }
+  };
+
+  const handleJoinRoom = async () => {
+    if (!roomCodeInput) return;
+    if (format !== "online" || !gameMode) {
+      setError("Сначала выбери формат и режим");
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const info = await api.roomJoin(apiConfig, roomCodeInput.toUpperCase(), format, gameMode);
+      setRoomInfo(info);
+      setRoomStarter(null);
+      setScreen("room");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось подключиться"));
+    }
+  };
+
+  const handleStartRoom = async () => {
+    if (!roomInfo) return;
+    setError(null);
+    setStatus(null);
+
+    try {
+      const res = await api.roomStart(apiConfig, roomInfo.room_code);
+      setRoomStarter(`Игру начинает: ${res.starter_name}`);
+      const info = await api.roomStatus(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+    } catch (err) {
+      setError(toUserError(err, "Не удалось начать игру"));
+    }
+  };
+
+  const handleStartRoomTurn = async () => {
+    if (!roomInfo) return;
+    setError(null);
+
+    try {
+      const info = await api.roomTurnStart(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
+  const handleRestartRoom = async () => {
+    if (!roomInfo) return;
+    setError(null);
+    setStatus("Новая игра начинается…");
+
+    try {
+      const res = await api.roomRestart(apiConfig, roomInfo.room_code);
+      setRoomStarter(`Игру начинает: ${res.starter_name}`);
+      const info = await api.roomStatus(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+      setStatus(null);
+    } catch (err) {
+      setStatus(null);
+      setError(toUserError(err, "Не удалось перезапустить игру"));
     }
   };
 
   const handleGetRole = async () => {
     if (!roomInfo) return;
     setError(null);
+
     try {
       const res = await api.roomRole(apiConfig, roomInfo.room_code);
-      console.debug("room role payload", res);
-      setRoomRole({ role: res.role, card: res.card, image_url: res.image_url, elixir_cost: res.elixir_cost });
+      setRoomRole({
+        role: res.role,
+        card: res.card,
+        image_url: res.image_url,
+        elixir_cost: res.elixir_cost,
+      });
       setScreen("roomRole");
-    } catch (err: any) {
-      setError(err.message || "Не удалось получить роль");
+    } catch (err) {
+      setError(toUserError(err, "Не удалось получить роль"));
     }
   };
 
-  const isHome = screen === "format";
-  const timerActive = timerTotal !== null && timerRemaining !== null;
-  const timerProgress =
-    timerActive && timerTotal
-      ? Math.max(0, Math.min(100, (timerRemaining! / timerTotal) * 100))
-      : 0;
-  const timerButtonLabel = timerContext === "offline" ? "Начать игру" : "Создать комнату";
-  const renderTimer = () => {
-    if (!timerActive) return null;
+  const backFromJoin = () => {
+    if (gameMode === "random") {
+      setRandomFlow("onlineCreate");
+      setScreen("randomInfo");
+      return;
+    }
+    setScreen("playMode");
+  };
+
+  const renderTurnProgress = () => {
+    if (!timerActive || timerSecondsLeft === null) return null;
+
     return (
       <div className="timer">
         <div className="timer-meta">
-          <span>Время обсуждения</span>
-          {timerRemaining === 0 ? (
+          <span>Осталось времени на ход</span>
+          {timerSecondsLeft === 0 ? (
             <span className="timer-ended">Время вышло</span>
           ) : (
-            <span className="timer-value">{timerRemaining} сек</span>
+            <span className="timer-value">{timerSecondsLeft} сек</span>
           )}
         </div>
         <div className="timer-bar">
@@ -435,6 +575,38 @@ export default function App() {
       </div>
     );
   };
+
+  const renderTimerSetup = () => (
+    <div className="timer-options">
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={timerEnabled}
+          onChange={(e) => setTimerEnabled(e.target.checked)}
+        />
+        <span>Использовать таймер</span>
+      </label>
+
+      {timerEnabled && (
+        <div className="timer-setup">
+          <div className="timer-setup-label">Выберите, сколько времени даётся каждому игроку на ход</div>
+          <div className="timer-setup-value">{turnTimeSeconds} секунд</div>
+          <input
+            className="timer-slider"
+            type="range"
+            min={5}
+            max={30}
+            step={1}
+            value={turnTimeSeconds}
+            onChange={(e) => setTurnTimeSeconds(Number(e.target.value))}
+          />
+          <div className="timer-setup-range">5–30 сек</div>
+        </div>
+      )}
+    </div>
+  );
+
+  const isHome = screen === "format";
 
   return (
     <div className={`app ${isHome ? "bg-home" : "bg-game"}`}>
@@ -454,22 +626,10 @@ export default function App() {
                 Выбери формат игры
                 <span>Офлайн — один телефон. Онлайн — каждый игрок у себя.</span>
               </div>
-              <button
-                className="btn full"
-                onClick={() => {
-                  setFormat("offline");
-                  setScreen("playMode");
-                }}
-              >
+              <button className="btn full" onClick={() => pickFormat("offline")}>
                 Офлайн
               </button>
-              <button
-                className="btn secondary full"
-                onClick={() => {
-                  setFormat("online");
-                  setScreen("playMode");
-                }}
-              >
+              <button className="btn secondary full" onClick={() => pickFormat("online")}>
                 Онлайн
               </button>
             </div>
@@ -491,307 +651,381 @@ export default function App() {
               </div>
             )}
 
-      {screen === "playMode" && (
-        <div className="card bottom">
-          <div className="title">Выбери режим</div>
-          <div className="actions stack">
-            <button
-              className="btn full"
-              onClick={() => {
-                setGameMode("standard");
-                proceedAfterMode();
-              }}
-            >
-              Стандартный
-            </button>
-            <button
-              className="btn secondary full"
-              onClick={() => {
-                setGameMode("random");
-                if (format === "online") {
-                  setScreen("onlineMenu");
-                } else {
-                  setRandomFlow("offline");
-                  setScreen("randomInfo");
-                }
-              }}
-            >
-              Рандом
-            </button>
-          </div>
-          <button className="link" onClick={resetAll}>Назад</button>
-        </div>
-      )}
+            {screen === "playMode" && (
+              <div className="card bottom">
+                <div className="title">Выбери режим</div>
+                <div className="actions stack">
+                  <button className="btn full" onClick={pickStandardMode}>
+                    Стандартный
+                  </button>
+                  <button className="btn secondary full" onClick={pickRandomMode}>
+                    Рандом
+                  </button>
+                </div>
 
-      {screen === "randomInfo" && (
-        <div className="card center">
-          <div className="title">Рандом режим</div>
-          <p className="text">
-            Выберите режимы, которые хотите, чтобы могли выпасть. Бот случайно выберет один из отмеченных режимов.
-          </p>
-          <div className="randomList">
-            {RANDOM_SCENARIOS.map((scenario) => {
-              const checked = randomAllowed.includes(scenario.id);
-              return (
+                {format === "online" && gameMode === "standard" && (
+                  <>
+                    {renderTimerSetup()}
+                    <div className="actions stack">
+                      <button className="btn full" onClick={createRoomNow}>
+                        Создать комнату
+                      </button>
+                      <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
+                        Подключиться
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <button className="link" onClick={resetAll}>
+                  Назад
+                </button>
+              </div>
+            )}
+
+            {screen === "randomInfo" && (
+              <div className="card center">
+                <div className="title">Рандом режим</div>
+                <p className="text">
+                  Выберите режимы, которые хотите, чтобы могли выпасть. Бот случайно выберет один из
+                  отмеченных режимов.
+                </p>
+
+                <div className="randomList">
+                  {RANDOM_SCENARIOS.map((scenario) => {
+                    const checked = randomAllowed.includes(scenario.id);
+                    return (
+                      <button
+                        key={scenario.id}
+                        type="button"
+                        className={`randomItem ${checked ? "checked" : ""}`}
+                        onClick={() => {
+                          setRandomAllowed((prev) => {
+                            if (prev.includes(scenario.id)) {
+                              return prev.filter((item) => item !== scenario.id);
+                            }
+                            return [...prev, scenario.id];
+                          });
+                        }}
+                      >
+                        <span className={`checkbox ${checked ? "checked" : ""}`} />
+                        <span className="randomLabel">{scenario.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {randomAllowed.length < 2 && <div className="hint danger">Выберите минимум два режима</div>}
+
+                {randomFlow === "onlineCreate" && renderTimerSetup()}
+
+                <div className="actions stack">
+                  {randomFlow === "onlineCreate" ? (
+                    <>
+                      <button className="btn full" onClick={createRoomNow} disabled={randomAllowed.length < 2}>
+                        Создать комнату
+                      </button>
+                      <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
+                        Подключиться
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn full"
+                      onClick={() => {
+                        setPendingOfflineCount(null);
+                        setScreen("offlinePlayers");
+                      }}
+                      disabled={randomAllowed.length < 2}
+                    >
+                      Продолжить
+                    </button>
+                  )}
+                </div>
+
                 <button
-                  key={scenario.id}
-                  type="button"
-                  className={`randomItem ${checked ? "checked" : ""}`}
+                  className="link"
                   onClick={() => {
-                    setRandomAllowed((prev) => {
-                      if (prev.includes(scenario.id)) {
-                        return prev.filter((item) => item !== scenario.id);
-                      }
-                      return [...prev, scenario.id];
-                    });
+                    setRandomFlow(null);
+                    setScreen("playMode");
                   }}
                 >
-                  <span className={`checkbox ${checked ? "checked" : ""}`} />
-                  <span className="randomLabel">{scenario.label}</span>
+                  Назад
                 </button>
-              );
-            })}
-          </div>
-          {randomAllowed.length < 2 && (
-            <div className="hint danger">Выберите минимум два режима</div>
-          )}
-          <div className="actions">
-            <button
-              className="btn full"
-              onClick={() => {
-                if (randomFlow === "onlineCreate") {
-                  setRandomFlow(null);
-                  openTimerForOnline(true);
-                  return;
-                }
-                setRandomFlow("offline");
-                proceedAfterMode();
-              }}
-              disabled={randomAllowed.length < 2}
-            >
-              Продолжить
-            </button>
-          </div>
-          <button className="link" onClick={() => { setRandomFlow(null); setScreen("playMode"); }}>Назад</button>
-        </div>
-      )}
-
-      {screen === "timerSetup" && (
-        <div className="card center">
-          <div className="title">Выберите, сколько будет дано времени на подсказку</div>
-          <div className="timer-setup">
-            <div className="timer-setup-value">{discussionTime} секунд</div>
-            <input
-              className="timer-slider"
-              type="range"
-              min={10}
-              max={120}
-              step={5}
-              value={discussionTime}
-              onChange={(e) => setDiscussionTime(Number(e.target.value))}
-            />
-            <div className="timer-setup-range">10–120 сек</div>
-          </div>
-          <div className="actions">
-            <button className="btn full" onClick={handleTimerContinue}>
-              {timerButtonLabel}
-            </button>
-          </div>
-          <button className="link" onClick={handleTimerBack}>Назад</button>
-        </div>
-      )}
-
-      {screen === "offlinePlayers" && (
-        <div className="card center">
-          <div className="title">Сколько игроков?</div>
-          <div className="grid">
-            {Array.from({ length: 10 }, (_, i) => i + 3).map((count) => (
-              <button key={count} className="btn small" onClick={() => openTimerForOffline(count)}>
-                {count}
-              </button>
-            ))}
-          </div>
-          <button className="link" onClick={() => setScreen("playMode")}>Назад</button>
-        </div>
-      )}
-
-      {screen === "offlinePlayer" && (
-        <div className="card center">
-          <div className="title">Игрок {currentPlayer}</div>
-          <p className="text">Нажми кнопку, чтобы увидеть свою карту.</p>
-          <div className="actions">
-            <button className="btn" onClick={handleReveal}>Показать карту</button>
-          </div>
-        </div>
-      )}
-
-      {screen === "offlineRole" && offlineRole && (
-        <div className="card center">
-          <div className="title">Твоя роль</div>
-          {offlineRole.role === "spy" && (
-            <div className="card-image spy-frame">
-              <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
-            </div>
-          )}
-          {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
-            <div className="card-image-wrapper">
-              <img
-                className="card-image"
-                src={resolveImageUrl(offlineRole.image_url)}
-                alt="Карта"
-                onError={() => setOfflineImageOk(false)}
-              />
-              {typeof offlineRole.elixir_cost === "number" && (
-                <div className="elixir-badge" aria-label={`Эликсир ${offlineRole.elixir_cost}`}>
-                  <img src="/assets/elik.png" alt="Эликсир" />
-                  <span>{offlineRole.elixir_cost}</span>
-                </div>
-              )}
-            </div>
-          )}
-          {offlineRole.role === "card" && offlineRole.image_url && !offlineImageOk && (
-            <div className="hint">Изображение недоступно</div>
-          )}
-          <div className="role">
-            {offlineRole.role === "spy" ? "🕵️ Ты шпион" : `🗺️ Карта: ${offlineRole.card}`}
-          </div>
-          <div className="actions">
-            <button className="btn" onClick={handleClose}>Закрыть</button>
-          </div>
-        </div>
-      )}
-
-      {screen === "offlineNext" && (
-        <div className="card center">
-          <div className="title">Передайте телефон следующему игроку</div>
-          <p className="text">Когда будете готовы, продолжайте.</p>
-          <div className="actions">
-            <button className="btn" onClick={() => setScreen("offlinePlayer")}>Продолжить</button>
-          </div>
-        </div>
-      )}
-
-      {screen === "offlineFinished" && (
-        <div className="card center">
-          <div className="title">Роли розданы</div>
-          <p className="text">Игру начинает: Игрок {starterPlayer ?? "?"}</p>
-          {renderTimer()}
-          <div className="actions">
-            <button className="btn" onClick={handleRestartOffline}>Сыграть ещё</button>
-            <button className="btn" onClick={resetAll}>Новая игра</button>
-          </div>
-        </div>
-      )}
-
-      {screen === "onlineMenu" && (
-        <div className="card bottom">
-          <div className="title">Онлайн игра</div>
-          <p className="text">Создай комнату или подключись по коду.</p>
-          <div className="actions stack">
-            <button className="btn full" onClick={handleCreateRoom}>Создать комнату</button>
-            <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>Подключиться</button>
-          </div>
-          <button className="link" onClick={() => setScreen("playMode")}>Назад</button>
-        </div>
-      )}
-
-      {screen === "joinRoom" && (
-        <div className="card center">
-          <div className="title">Подключиться</div>
-          <input
-            className="input"
-            placeholder="Код комнаты"
-            value={roomCodeInput}
-            onChange={(e) => setRoomCodeInput(e.target.value)}
-          />
-          <div className="actions stack">
-            <button className="btn full" onClick={handleJoinRoom}>Войти</button>
-          </div>
-          <button className="link" onClick={() => setScreen("onlineMenu")}>Назад</button>
-        </div>
-      )}
-
-      {screen === "room" && roomInfo && (
-        <div className="card center">
-          <div className="title">
-            Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
-          </div>
-          <p className="text">Игроков: {roomInfo.player_count}</p>
-          <div className="players">
-            {roomInfo.players.map((p) => (
-              <div key={p.user_id} className="player">
-                {p.display_name?.trim() ? p.display_name : "Не удалось получить имя из Telegram"}
               </div>
-            ))}
-          </div>
+            )}
 
-          {roomInfo.state === "waiting" && (
-            <div className="actions">
-              {roomInfo.can_start && (
-                <button className="btn" onClick={handleStartRoom}>Начать игру</button>
-              )}
-              {!roomInfo.can_start && (
-                <div className="hint">Ожидаем минимум {MIN_PLAYERS} игроков</div>
-              )}
-            </div>
-          )}
-
-          {roomInfo.state === "started" && (
-            <div className="actions">
-              <button className="btn" onClick={handleGetRole}>Показать мою роль</button>
-              {roomInfo.you_are_owner && (
-                <button className="btn secondary" onClick={handleRestartRoom}>Сыграть ещё</button>
-              )}
-            </div>
-          )}
-
-          {roomInfo.state === "started" && renderTimer()}
-
-          {roomStarter && <div className="hint">{roomStarter}</div>}
-          <button className="link" onClick={resetAll}>Новая игра</button>
-        </div>
-      )}
-
-      {screen === "roomRole" && roomRole && (
-        <div className="card center">
-          <div className="title">Твоя роль</div>
-          {roomRole.role === "spy" && (
-            <div className="card-image spy-frame">
-              <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
-            </div>
-          )}
-          {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
-            <div className="card-image-wrapper">
-              <img
-                className="card-image"
-                src={resolveImageUrl(roomRole.image_url)}
-                alt="Карта"
-                onError={() => setRoomImageOk(false)}
-              />
-              {typeof roomRole.elixir_cost === "number" && (
-                <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
-                  <img src="/assets/elik.png" alt="Эликсир" />
-                  <span>{roomRole.elixir_cost}</span>
+            {screen === "offlinePlayers" && (
+              <div className="card center">
+                <div className="title">Сколько игроков?</div>
+                <div className="grid">
+                  {Array.from({ length: 10 }, (_, i) => i + 3).map((count) => (
+                    <button
+                      key={count}
+                      className={`btn small ${pendingOfflineCount === count ? "secondary" : ""}`}
+                      onClick={() => setPendingOfflineCount(count)}
+                    >
+                      {count}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
-          {roomRole.role === "card" && roomRole.image_url && !roomImageOk && (
-            <div className="hint">Изображение недоступно</div>
-          )}
-          <div className="role">
-            {roomRole.role === "spy" ? "🕵️ Ты шпион" : `🗺️ Карта: ${roomRole.card}`}
-          </div>
-          <div className="actions">
-            <button className="btn" onClick={() => setScreen("room")}>Назад</button>
-          </div>
-        </div>
-      )}
+
+                {pendingOfflineCount && <div className="hint">Выбрано игроков: {pendingOfflineCount}</div>}
+
+                {renderTimerSetup()}
+
+                <div className="actions stack">
+                  <button className="btn full" onClick={handleStartOffline} disabled={!pendingOfflineCount}>
+                    Начать игру
+                  </button>
+                </div>
+
+                <button className="link" onClick={() => setScreen("playMode")}>Назад</button>
+              </div>
+            )}
+
+            {screen === "offlinePlayer" && (
+              <div className="card center">
+                <div className="title">Игрок {currentPlayer}</div>
+                <p className="text">Нажми кнопку, чтобы увидеть свою карту.</p>
+                <div className="actions">
+                  <button className="btn" onClick={handleReveal}>
+                    Показать карту
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === "offlineRole" && offlineRole && (
+              <div className="card center">
+                <div className="title">Твоя роль</div>
+                {offlineRole.role === "spy" && (
+                  <div className="card-image spy-frame">
+                    <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
+                  </div>
+                )}
+                {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
+                  <div className="card-image-wrapper">
+                    <img
+                      className="card-image"
+                      src={resolveImageUrl(offlineRole.image_url)}
+                      alt="Карта"
+                      onError={() => setOfflineImageOk(false)}
+                    />
+                    {typeof offlineRole.elixir_cost === "number" && (
+                      <div className="elixir-badge" aria-label={`Эликсир ${offlineRole.elixir_cost}`}>
+                        <img src="/assets/elik.png" alt="Эликсир" />
+                        <span>{offlineRole.elixir_cost}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {offlineRole.role === "card" && offlineRole.image_url && !offlineImageOk && (
+                  <div className="hint">Изображение недоступно</div>
+                )}
+                <div className="role">{offlineRole.role === "spy" ? "Ты шпион" : `Карта: ${offlineRole.card}`}</div>
+                <div className="actions">
+                  <button className="btn" onClick={handleCloseRole}>
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === "offlineNext" && (
+              <div className="card center">
+                <div className="title">Передайте телефон следующему игроку</div>
+                <p className="text">Когда будете готовы, продолжайте.</p>
+                <div className="actions">
+                  <button className="btn" onClick={() => setScreen("offlinePlayer")}>
+                    Продолжить
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === "offlineFinished" && (
+              <div className="card center">
+                <div className="title">Роли розданы</div>
+                <p className="text">Игру начинает: Игрок {starterPlayer ?? "?"}</p>
+                <div className="actions stack">
+                  <button className="btn full" onClick={handleRestartOffline}>
+                    Сыграть ещё
+                  </button>
+                  <button className="btn secondary full" onClick={resetAll}>
+                    Новая игра
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === "offlineTurn" && offlineTurn && (
+              <div className="card center turn-board">
+                {!offlineTurn.turns_completed ? (
+                  <>
+                    <div className="title">
+                      {offlineTurn.turn_started_at
+                        ? `Ход игрока ${offlineTurn.current_player_number}`
+                        : `Начинает: Игрок ${offlineTurn.current_player_number}`}
+                    </div>
+                    <p className="text">Переход к следующему игроку происходит автоматически по таймеру.</p>
+                    {!offlineTurn.turn_started_at && (
+                      <div className="actions">
+                        <button className="btn" onClick={handleStartOfflineTurn}>
+                          Начать ход
+                        </button>
+                      </div>
+                    )}
+                    {renderTurnProgress()}
+                  </>
+                ) : (
+                  <>
+                    <div className="title">Все ходы завершены</div>
+                    <p className="text">Таймер выполнил по одному ходу для каждого игрока.</p>
+                  </>
+                )}
+
+                <div className="actions stack">
+                  <button className="btn full" onClick={handleRestartOffline}>
+                    Сыграть ещё
+                  </button>
+                  <button className="btn secondary full" onClick={resetAll}>
+                    Новая игра
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === "joinRoom" && (
+              <div className="card center">
+                <div className="title">Подключиться</div>
+                <input
+                  className="input"
+                  placeholder="Код комнаты"
+                  value={roomCodeInput}
+                  onChange={(e) => setRoomCodeInput(e.target.value)}
+                />
+                <div className="actions stack">
+                  <button className="btn full" onClick={handleJoinRoom}>
+                    Войти
+                  </button>
+                </div>
+                <button className="link" onClick={backFromJoin}>
+                  Назад
+                </button>
+              </div>
+            )}
+
+            {screen === "room" && roomInfo && (
+              <div className="card center">
+                <div className="title">
+                  Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
+                </div>
+                <p className="text">Игроков: {roomInfo.player_count}</p>
+
+                <div className="players">
+                  {roomInfo.players.map((player) => (
+                    <div key={player.user_id} className="player">
+                      {player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}
+                    </div>
+                  ))}
+                </div>
+
+                {roomInfo.state === "waiting" && (
+                  <div className="actions">
+                    {roomInfo.can_start ? (
+                      <button className="btn" onClick={handleStartRoom}>
+                        Начать игру
+                      </button>
+                    ) : (
+                      <div className="hint">Ожидаем минимум {MIN_PLAYERS} игроков</div>
+                    )}
+                  </div>
+                )}
+
+                {roomInfo.state === "started" && (
+                  <div className="actions">
+                    <button className="btn" onClick={handleGetRole}>
+                      Показать мою роль
+                    </button>
+                    {roomInfo.you_are_owner && (
+                      <button className="btn secondary" onClick={handleRestartRoom}>
+                        Сыграть ещё
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {roomInfo.state === "started" && roomInfo.timer_enabled && (
+                  <div className="turn-board">
+                    {!roomInfo.turns_completed ? (
+                      <>
+                        <div className="title">
+                          {roomInfo.turn_started_at
+                            ? `Ход игрока: ${roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}`
+                            : `Начинает: ${roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}`}
+                        </div>
+                        {!roomInfo.turn_started_at && (
+                          <div className="actions">
+                            <button className="btn" onClick={handleStartRoomTurn}>
+                              Начать ход
+                            </button>
+                          </div>
+                        )}
+                        {renderTurnProgress()}
+                      </>
+                    ) : (
+                      <div className="hint">Все игроки сделали по одному ходу.</div>
+                    )}
+                  </div>
+                )}
+
+                {roomStarter && <div className="hint">{roomStarter}</div>}
+
+                <button className="link" onClick={resetAll}>
+                  Новая игра
+                </button>
+              </div>
+            )}
+
+            {screen === "roomRole" && roomRole && (
+              <div className="card center">
+                <div className="title">Твоя роль</div>
+                {roomRole.role === "spy" && (
+                  <div className="card-image spy-frame">
+                    <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
+                  </div>
+                )}
+                {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
+                  <div className="card-image-wrapper">
+                    <img
+                      className="card-image"
+                      src={resolveImageUrl(roomRole.image_url)}
+                      alt="Карта"
+                      onError={() => setRoomImageOk(false)}
+                    />
+                    {typeof roomRole.elixir_cost === "number" && (
+                      <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
+                        <img src="/assets/elik.png" alt="Эликсир" />
+                        <span>{roomRole.elixir_cost}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {roomRole.role === "card" && roomRole.image_url && !roomImageOk && (
+                  <div className="hint">Изображение недоступно</div>
+                )}
+                <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
+                <div className="actions">
+                  <button className="btn" onClick={() => setScreen("room")}>
+                    Назад
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
     </div>
   );
 }
-
-const MIN_PLAYERS = 3;
