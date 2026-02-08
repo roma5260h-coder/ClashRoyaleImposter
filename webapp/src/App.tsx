@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api, type ApiConfig } from "./api";
-import type { GameFormat, GameMode, RoomInfo } from "./types";
+import type { GameFormat, GameMode, RoomInfo, TurnState } from "./types";
 
 const tg = (window as any).Telegram?.WebApp;
 
@@ -24,6 +24,8 @@ type Screen =
 type OfflineTurnStatus = {
   timer_enabled: boolean;
   turn_time_seconds?: number | null;
+  turn_active: boolean;
+  turn_state: TurnState;
   current_turn_index: number;
   current_player_number: number;
   turn_started_at?: number | null;
@@ -177,7 +179,7 @@ export default function App() {
   }, [apiConfig, roomInfo?.room_code, screen]);
 
   useEffect(() => {
-    if (screen !== "offlineTurn" || !offlineSessionId || !offlineTimerEnabled || offlineTurn?.turns_completed) {
+    if (screen !== "offlineTurn" || !offlineSessionId || !offlineTimerEnabled || offlineTurn?.turn_state === "finished") {
       return;
     }
 
@@ -201,7 +203,7 @@ export default function App() {
       canceled = true;
       clearInterval(interval);
     };
-  }, [apiConfig, offlineSessionId, offlineTimerEnabled, offlineTurn?.turns_completed, screen]);
+  }, [apiConfig, offlineSessionId, offlineTimerEnabled, offlineTurn?.turn_state, screen]);
 
   useEffect(() => {
     setOfflineImageOk(true);
@@ -212,11 +214,16 @@ export default function App() {
   }, [roomRole?.image_url, roomRole?.role]);
 
   const activeTurn = useMemo(() => {
-    if (screen === "offlineTurn" && offlineTurn?.timer_enabled && !offlineTurn.turns_completed) {
+    if (
+      screen === "offlineTurn" &&
+      offlineTurn?.timer_enabled &&
+      offlineTurn.turn_state === "turn_loop_active" &&
+      offlineTurn.turn_active
+    ) {
       return {
         startedAt: offlineTurn.turn_started_at ?? null,
         durationSeconds: offlineTurn.turn_time_seconds ?? null,
-        turnsCompleted: offlineTurn.turns_completed,
+        turnsCompleted: false,
       };
     }
 
@@ -224,12 +231,13 @@ export default function App() {
       screen === "room" &&
       roomInfo?.state === "started" &&
       roomInfo.timer_enabled &&
-      !roomInfo.turns_completed
+      roomInfo.turn_state === "turn_loop_active" &&
+      roomInfo.turn_active
     ) {
       return {
         startedAt: roomInfo.turn_started_at ?? null,
         durationSeconds: roomInfo.turn_time_seconds ?? null,
-        turnsCompleted: roomInfo.turns_completed ?? false,
+        turnsCompleted: false,
       };
     }
 
@@ -420,6 +428,18 @@ export default function App() {
     }
   };
 
+  const handleFinishOfflineTurn = async () => {
+    if (!offlineSessionId) return;
+    setError(null);
+
+    try {
+      const turn = await api.offlineTurnFinish(apiConfig, offlineSessionId);
+      setOfflineTurn(turn);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
   const handleRestartOffline = async () => {
     if (!offlineSessionId) return;
     setError(null);
@@ -516,6 +536,18 @@ export default function App() {
 
     try {
       const info = await api.roomTurnStart(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
+  const handleFinishRoomTurn = async () => {
+    if (!roomInfo) return;
+    setError(null);
+
+    try {
+      const info = await api.roomTurnFinish(apiConfig, roomInfo.room_code);
       setRoomInfo(info);
     } catch (err) {
       setError(toUserError(err, GENERIC_ERROR_MESSAGE));
@@ -923,38 +955,45 @@ export default function App() {
 
             {screen === "offlineTurn" && offlineTurn && (
               <div className="card center turn-board">
-                {!offlineTurn.turns_completed ? (
+                {offlineTurn.turn_state === "ready_to_start" && (
                   <>
-                    <div className="title">
-                      {offlineTurn.turn_started_at
-                        ? `Ход игрока ${offlineTurn.current_player_number}`
-                        : `Начинает: Игрок ${offlineTurn.current_player_number}`}
+                    <div className="title">Роли розданы</div>
+                    <p className="text">Игру начинает: Игрок {starterPlayer ?? offlineTurn.current_player_number}</p>
+                    <div className="actions">
+                      <button className="btn" onClick={handleStartOfflineTurn}>
+                        Начать игру
+                      </button>
                     </div>
-                    <p className="text">Переход к следующему игроку происходит автоматически по таймеру.</p>
-                    {!offlineTurn.turn_started_at && (
-                      <div className="actions">
-                        <button className="btn" onClick={handleStartOfflineTurn}>
-                          Начать ход
-                        </button>
-                      </div>
-                    )}
-                    {renderTurnProgress()}
-                  </>
-                ) : (
-                  <>
-                    <div className="title">Все ходы завершены</div>
-                    <p className="text">Таймер выполнил по одному ходу для каждого игрока.</p>
                   </>
                 )}
 
-                <div className="actions stack">
-                  <button className="btn full" onClick={handleRestartOffline}>
-                    Сыграть ещё
-                  </button>
-                  <button className="btn secondary full" onClick={resetAll}>
-                    Новая игра
-                  </button>
-                </div>
+                {offlineTurn.turn_state === "turn_loop_active" && (
+                  <>
+                    <div className="title">Ход: Игрок {offlineTurn.current_player_number}</div>
+                    <p className="text">Переход к следующему игроку происходит автоматически по таймеру.</p>
+                    {renderTurnProgress()}
+                    <div className="actions">
+                      <button className="btn secondary" onClick={handleFinishOfflineTurn}>
+                        Игра окончена
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {offlineTurn.turn_state === "finished" && (
+                  <>
+                    <div className="title">Игра завершена</div>
+                    <p className="text">Можно начать новый раунд или вернуться в меню.</p>
+                    <div className="actions stack">
+                      <button className="btn full" onClick={handleRestartOffline}>
+                        Сыграть ещё
+                      </button>
+                      <button className="btn secondary full" onClick={resetAll}>
+                        Новая игра
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1011,7 +1050,7 @@ export default function App() {
                     <button className="btn" onClick={handleGetRole}>
                       Показать мою роль
                     </button>
-                    {roomInfo.you_are_owner && (
+                    {roomInfo.you_are_owner && (!roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
                       <button className="btn secondary" onClick={handleRestartRoom}>
                         Сыграть ещё
                       </button>
@@ -1021,33 +1060,52 @@ export default function App() {
 
                 {roomInfo.state === "started" && roomInfo.timer_enabled && (
                   <div className="turn-board">
-                    {!roomInfo.turns_completed ? (
+                    {roomInfo.turn_state === "ready_to_start" && (
                       <>
                         <div className="title">
-                          {roomInfo.turn_started_at
-                            ? `Ход игрока: ${roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}`
-                            : `Начинает: ${roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}`}
+                          Начинает: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
                         </div>
-                        {!roomInfo.turn_started_at && (
+                        {roomInfo.you_are_owner ? (
                           <div className="actions">
                             <button className="btn" onClick={handleStartRoomTurn}>
-                              Начать ход
+                              Начать игру
                             </button>
                           </div>
+                        ) : (
+                          <div className="hint">Ожидаем, пока создатель комнаты запустит ходы</div>
                         )}
-                        {renderTurnProgress()}
                       </>
-                    ) : (
-                      <div className="hint">Все игроки сделали по одному ходу.</div>
                     )}
+
+                    {roomInfo.turn_state === "turn_loop_active" && (
+                      <>
+                        <div className="title">
+                          Ход игрока: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
+                        </div>
+                        {renderTurnProgress()}
+                        {roomInfo.you_are_owner ? (
+                          <div className="actions">
+                            <button className="btn secondary" onClick={handleFinishRoomTurn}>
+                              Игра окончена
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="hint">Только создатель комнаты может завершить игру</div>
+                        )}
+                      </>
+                    )}
+
+                    {roomInfo.turn_state === "finished" && <div className="hint">Игра завершена.</div>}
                   </div>
                 )}
 
                 {roomStarter && <div className="hint">{roomStarter}</div>}
 
-                <button className="link" onClick={resetAll}>
-                  Новая игра
-                </button>
+                {(roomInfo.state !== "started" || !roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
+                  <button className="link" onClick={resetAll}>
+                    Новая игра
+                  </button>
+                )}
               </div>
             )}
 

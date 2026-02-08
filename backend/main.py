@@ -34,6 +34,11 @@ IMAGE_CACHE_TTL_SECONDS = 60 * 60 * 24
 MIN_TURN_TIME_SECONDS = 5
 MAX_TURN_TIME_SECONDS = 30
 DEFAULT_TURN_TIME_SECONDS = 8
+OFFLINE_STATE_REVEALING = "revealing"
+TURN_STATE_WAITING = "waiting"
+TURN_STATE_READY_TO_START = "ready_to_start"
+TURN_STATE_ACTIVE = "turn_loop_active"
+TURN_STATE_FINISHED = "finished"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 INIT_DATA_BYPASS = os.getenv("INIT_DATA_BYPASS", "0") == "1"
@@ -109,6 +114,8 @@ class OfflineTurnRequest(BaseRequest):
 class OfflineTurnStatusResponse(BaseModel):
     timer_enabled: bool
     turn_time_seconds: Optional[int] = None
+    turn_active: bool
+    turn_state: str
     current_turn_index: int
     current_player_number: int
     turn_started_at: Optional[float] = None
@@ -182,6 +189,8 @@ class RoomInfo(BaseModel):
     starter_name: Optional[str] = None
     timer_enabled: bool = False
     turn_time_seconds: Optional[int] = None
+    turn_active: bool = False
+    turn_state: str = TURN_STATE_WAITING
     current_turn_index: int = 0
     current_turn_name: Optional[str] = None
     turn_started_at: Optional[float] = None
@@ -217,12 +226,13 @@ class OfflineSession:
     turn_time_seconds: Optional[int]
     current_turn_index: int
     players_order: List[int]
+    turn_active: bool = False
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
     spy_players: List[int] = field(default_factory=list)
     cards_for_players: Dict[int, Optional[str]] = field(default_factory=dict)
     random_allowed_modes: List[str] = field(default_factory=list)
-    state: str = "revealing"
+    state: str = OFFLINE_STATE_REVEALING
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -241,6 +251,8 @@ class RoomSession:
     turn_time_seconds: Optional[int] = None
     current_turn_index: int = 0
     players_order: List[int] = field(default_factory=list)
+    turn_active: bool = False
+    turn_state: str = TURN_STATE_WAITING
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
     spy_user_ids: List[int] = field(default_factory=list)
@@ -425,7 +437,8 @@ def normalize_offline_turn_state(session: OfflineSession) -> bool:
     if not session.timer_enabled:
         session.turn_time_seconds = None
         session.turn_started_at = None
-        session.turns_completed = True
+        session.turn_active = False
+        session.turns_completed = session.state == TURN_STATE_FINISHED
         return False
 
     if session.turn_time_seconds is None:
@@ -453,6 +466,8 @@ def normalize_offline_turn_state(session: OfflineSession) -> bool:
 
     if not session.players_order:
         session.turns_completed = True
+        session.turn_active = False
+        session.state = TURN_STATE_FINISHED
         session.turn_started_at = None
         return False
     return True
@@ -462,7 +477,8 @@ def normalize_room_turn_state(room: RoomSession) -> bool:
     if not room.timer_enabled:
         room.turn_time_seconds = None
         room.turn_started_at = None
-        room.turns_completed = True
+        room.turn_active = False
+        room.turns_completed = room.turn_state == TURN_STATE_FINISHED
         return False
 
     if room.turn_time_seconds is None:
@@ -490,6 +506,8 @@ def normalize_room_turn_state(room: RoomSession) -> bool:
 
     if not room.players_order:
         room.turns_completed = True
+        room.turn_active = False
+        room.turn_state = TURN_STATE_FINISHED
         room.turn_started_at = None
         return False
     return True
@@ -520,7 +538,7 @@ def current_room_turn_user_id(room: RoomSession) -> Optional[int]:
 
 
 def advance_offline_turn(session: OfflineSession) -> None:
-    if session.turns_completed:
+    if session.state != TURN_STATE_ACTIVE or not session.turn_active:
         return
     if not normalize_offline_turn_state(session):
         return
@@ -537,16 +555,7 @@ def advance_offline_turn(session: OfflineSession) -> None:
     if steps_elapsed <= 0:
         return
 
-    last_index = len(session.players_order) - 1
-    next_index = session.current_turn_index + steps_elapsed
-    if next_index >= last_index:
-        session.current_turn_index = last_index
-        session.turns_completed = True
-        session.turn_started_at = None
-        logger.info("Offline session %s turn cycle completed", session.session_id)
-        return
-
-    session.current_turn_index = next_index
+    session.current_turn_index = (session.current_turn_index + steps_elapsed) % len(session.players_order)
     session.turn_started_at += steps_elapsed * session.turn_time_seconds
     logger.info(
         "Offline session %s advanced to turn index=%s",
@@ -556,7 +565,7 @@ def advance_offline_turn(session: OfflineSession) -> None:
 
 
 def advance_room_turn(room: RoomSession) -> None:
-    if room.state != "started" or room.turns_completed:
+    if room.state != "started" or room.turn_state != TURN_STATE_ACTIVE or not room.turn_active:
         return
     if not normalize_room_turn_state(room):
         return
@@ -573,21 +582,27 @@ def advance_room_turn(room: RoomSession) -> None:
     if steps_elapsed <= 0:
         return
 
-    last_index = len(room.players_order) - 1
-    next_index = room.current_turn_index + steps_elapsed
-    if next_index >= last_index:
-        room.current_turn_index = last_index
-        room.turns_completed = True
-        room.turn_started_at = None
-        logger.info("Room %s turn cycle completed", room.room_code)
-        return
-
-    room.current_turn_index = next_index
+    room.current_turn_index = (room.current_turn_index + steps_elapsed) % len(room.players_order)
     room.turn_started_at += steps_elapsed * room.turn_time_seconds
     logger.info(
         "Room %s advanced to turn index=%s",
         room.room_code,
         room.current_turn_index,
+    )
+
+
+def build_offline_turn_status_response(session: OfflineSession) -> OfflineTurnStatusResponse:
+    current_number = current_offline_turn_player(session)
+    session.turns_completed = session.state == TURN_STATE_FINISHED
+    return OfflineTurnStatusResponse(
+        timer_enabled=session.timer_enabled,
+        turn_time_seconds=session.turn_time_seconds,
+        turn_active=session.turn_active,
+        turn_state=session.state,
+        current_turn_index=session.current_turn_index,
+        current_player_number=current_number,
+        turn_started_at=session.turn_started_at,
+        turns_completed=session.turns_completed,
     )
 
 
@@ -651,8 +666,9 @@ async def offline_start(request: OfflineStartRequest) -> OfflineStartResponse:
         turn_time_seconds=turn_time_seconds,
         current_turn_index=0,
         players_order=players,
+        turn_active=False,
         turn_started_at=None,
-        turns_completed=not timer_enabled,
+        turns_completed=False,
         spy_players=spies,
         cards_for_players=cards_for_players,
         random_allowed_modes=random_allowed or [],
@@ -716,7 +732,18 @@ async def offline_close(request: OfflineCloseRequest) -> OfflineCloseResponse:
             current_player_number=session.current_player_number,
         )
 
-    session.state = "finished"
+    if session.timer_enabled:
+        session.state = TURN_STATE_READY_TO_START
+        session.current_turn_index = 0
+        session.turn_started_at = None
+        session.turn_active = False
+        session.turns_completed = False
+    else:
+        session.state = TURN_STATE_FINISHED
+        session.current_turn_index = 0
+        session.turn_started_at = None
+        session.turn_active = False
+        session.turns_completed = True
     starter = random_int(1, session.player_count)
     return OfflineCloseResponse(
         finished=True,
@@ -752,10 +779,11 @@ async def offline_restart(request: OfflineRestartRequest) -> OfflineStartRespons
     session.cards_for_players = cards_for_players
     session.resolved_random_mode = resolved_mode
     session.current_player_number = 1
-    session.state = "revealing"
+    session.state = OFFLINE_STATE_REVEALING
     session.current_turn_index = 0
     session.turn_started_at = None
-    session.turns_completed = not session.timer_enabled
+    session.turn_active = False
+    session.turns_completed = False
 
     return OfflineStartResponse(
         session_id=session.session_id,
@@ -779,15 +807,7 @@ async def offline_turn_status(request: OfflineTurnRequest) -> OfflineTurnStatusR
         raise HTTPException(status_code=403, detail="Forbidden")
 
     advance_offline_turn(session)
-    current_number = current_offline_turn_player(session)
-    return OfflineTurnStatusResponse(
-        timer_enabled=session.timer_enabled,
-        turn_time_seconds=session.turn_time_seconds,
-        current_turn_index=session.current_turn_index,
-        current_player_number=current_number,
-        turn_started_at=session.turn_started_at,
-        turns_completed=session.turns_completed,
-    )
+    return build_offline_turn_status_response(session)
 
 
 @app.post("/api/offline/turn/start", response_model=OfflineTurnStatusResponse)
@@ -805,21 +825,40 @@ async def offline_turn_start(request: OfflineTurnRequest) -> OfflineTurnStatusRe
         raise HTTPException(status_code=400, detail="Timer disabled")
     if not normalize_offline_turn_state(session):
         raise HTTPException(status_code=400, detail="Timer disabled")
-    if session.turns_completed:
-        raise HTTPException(status_code=400, detail="Turns already completed")
+    if session.state == TURN_STATE_FINISHED:
+        raise HTTPException(status_code=400, detail="Игра уже завершена")
+    if session.state not in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
+        raise HTTPException(status_code=400, detail="Сначала завершите раздачу ролей")
 
+    session.state = TURN_STATE_ACTIVE
+    session.turn_active = True
     if session.turn_started_at is None:
         session.turn_started_at = time.time()
     advance_offline_turn(session)
-    current_number = current_offline_turn_player(session)
-    return OfflineTurnStatusResponse(
-        timer_enabled=session.timer_enabled,
-        turn_time_seconds=session.turn_time_seconds,
-        current_turn_index=session.current_turn_index,
-        current_player_number=current_number,
-        turn_started_at=session.turn_started_at,
-        turns_completed=session.turns_completed,
-    )
+    return build_offline_turn_status_response(session)
+
+
+@app.post("/api/offline/turn/finish", response_model=OfflineTurnStatusResponse)
+async def offline_turn_finish(request: OfflineTurnRequest) -> OfflineTurnStatusResponse:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    session = offline_sessions.get(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not session.timer_enabled:
+        raise HTTPException(status_code=400, detail="Timer disabled")
+    if session.state == OFFLINE_STATE_REVEALING:
+        raise HTTPException(status_code=400, detail="Сначала завершите раздачу ролей")
+
+    session.state = TURN_STATE_FINISHED
+    session.turn_active = False
+    session.turn_started_at = None
+    session.turns_completed = True
+    return build_offline_turn_status_response(session)
 
 
 def random_int(start: int, end: int) -> int:
@@ -864,8 +903,10 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         turn_time_seconds=turn_time_seconds,
         current_turn_index=0,
         players_order=[],
+        turn_active=False,
+        turn_state=TURN_STATE_WAITING,
         turn_started_at=None,
-        turns_completed=not timer_enabled,
+        turns_completed=False,
     )
     room.players[user_id] = owner_entry
     rooms[room_code] = room
@@ -953,7 +994,13 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     room.players_order = players
     room.current_turn_index = 0
     room.turn_started_at = None
-    room.turns_completed = not room.timer_enabled
+    room.turn_active = False
+    if room.timer_enabled:
+        room.turn_state = TURN_STATE_READY_TO_START
+        room.turns_completed = False
+    else:
+        room.turn_state = TURN_STATE_FINISHED
+        room.turns_completed = True
 
     starter_user_id = random_choice(players)
     room.starter_user_id = starter_user_id
@@ -1017,7 +1064,13 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     room.players_order = players
     room.current_turn_index = 0
     room.turn_started_at = None
-    room.turns_completed = not room.timer_enabled
+    room.turn_active = False
+    if room.timer_enabled:
+        room.turn_state = TURN_STATE_READY_TO_START
+        room.turns_completed = False
+    else:
+        room.turn_state = TURN_STATE_FINISHED
+        room.turns_completed = True
     room.starter_user_id = random_choice(players)
 
     starter_entry = room.players.get(room.starter_user_id)
@@ -1041,19 +1094,48 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
         raise HTTPException(status_code=404, detail="Room not found")
     if room.state != "started":
         raise HTTPException(status_code=400, detail="Game not started")
-    if user_id not in room.players:
-        raise HTTPException(status_code=403, detail="Not in room")
+    if room.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Only owner can control turns")
     if not room.timer_enabled:
         raise HTTPException(status_code=400, detail="Timer disabled")
     if not normalize_room_turn_state(room):
         raise HTTPException(status_code=400, detail="Timer disabled")
-    if room.turns_completed:
-        raise HTTPException(status_code=400, detail="Turns already completed")
+    if room.turn_state == TURN_STATE_FINISHED:
+        raise HTTPException(status_code=400, detail="Игра уже завершена")
+    if room.turn_state not in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
+        raise HTTPException(status_code=400, detail="Сначала завершите раздачу ролей")
 
+    room.turn_state = TURN_STATE_ACTIVE
+    room.turn_active = True
     if room.turn_started_at is None:
         room.turn_started_at = time.time()
 
     advance_room_turn(room)
+    return room_to_info(room, user_id)
+
+
+@app.post("/api/room/turn/finish", response_model=RoomInfo)
+async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    room = rooms.get(request.room_code.upper())
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.state != "started":
+        raise HTTPException(status_code=400, detail="Game not started")
+    if room.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Only owner can finish")
+    if not room.timer_enabled:
+        raise HTTPException(status_code=400, detail="Timer disabled")
+    if room.turn_state == TURN_STATE_WAITING:
+        raise HTTPException(status_code=400, detail="Сначала запустите игру")
+
+    room.turn_state = TURN_STATE_FINISHED
+    room.turn_active = False
+    room.turn_started_at = None
+    room.turns_completed = True
     return room_to_info(room, user_id)
 
 
@@ -1087,13 +1169,14 @@ def card_image(name: str) -> Response:
 
 def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
     advance_room_turn(room)
+    room.turns_completed = room.turn_state == TURN_STATE_FINISHED
     starter_name = None
     if room.state == "started" and room.starter_user_id is not None:
         starter_entry = room.players.get(room.starter_user_id)
         if starter_entry:
             starter_name = starter_entry.get("display_name")
     current_turn_name = None
-    if room.state == "started" and room.timer_enabled and not room.turns_completed:
+    if room.state == "started" and room.timer_enabled and room.turn_state in (TURN_STATE_READY_TO_START, TURN_STATE_ACTIVE):
         current_turn_user_id = current_room_turn_user_id(room)
     else:
         current_turn_user_id = None
@@ -1124,6 +1207,8 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         starter_name=starter_name,
         timer_enabled=room.timer_enabled,
         turn_time_seconds=room.turn_time_seconds,
+        turn_active=room.turn_active,
+        turn_state=room.turn_state,
         current_turn_index=room.current_turn_index,
         current_turn_name=current_turn_name,
         turn_started_at=room.turn_started_at,

@@ -1,5 +1,6 @@
 export type GameFormat = "offline" | "online";
 export type GameMode = "standard" | "random";
+export type TurnState = "waiting" | "ready_to_start" | "turn_loop_active" | "finished";
 
 export type RoomInfo = {
   room_code: string;
@@ -16,6 +17,8 @@ export type RoomInfo = {
   starter_name?: string | null;
   timer_enabled?: boolean;
   turn_time_seconds?: number | null;
+  turn_active?: boolean;
+  turn_state?: TurnState;
   current_turn_index?: number;
   current_turn_name?: string | null;
   turn_started_at?: number | null;

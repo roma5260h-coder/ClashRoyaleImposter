@@ -152,9 +152,10 @@ body {
   border: none;
   background: var(--accent);
   color: #1b1b1b;
-  padding: 12px 16px;
+  padding: 11px 15px;
   border-radius: 12px;
   font-weight: 600;
+  font-size: 15px;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -177,14 +178,14 @@ body {
 }
 
 .btn.small {
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: 9px 11px;
+  font-size: 13px;
 }
 
 .btn.full {
   width: 100%;
-  font-size: 16px;
-  padding: 14px 16px;
+  font-size: 15px;
+  padding: 12px 15px;
 }
 
 .link {

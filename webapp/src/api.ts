@@ -1,8 +1,19 @@
-import type { GameFormat, GameMode, RoomInfo } from "./types";
+import type { GameFormat, GameMode, RoomInfo, TurnState } from "./types";
 
 type ApiConfig = {
   baseUrl: string;
   initData: string;
+};
+
+type OfflineTurnStatus = {
+  timer_enabled: boolean;
+  turn_time_seconds?: number | null;
+  turn_active: boolean;
+  turn_state: TurnState;
+  current_turn_index: number;
+  current_player_number: number;
+  turn_started_at?: number | null;
+  turns_completed: boolean;
 };
 
 async function post<T>(config: ApiConfig, path: string, body: Record<string, unknown>) {
@@ -76,24 +87,13 @@ export const api = {
     ),
 
   offlineTurnStatus: (config: ApiConfig, sessionId: string) =>
-    post<{
-      timer_enabled: boolean;
-      turn_time_seconds?: number | null;
-      current_turn_index: number;
-      current_player_number: number;
-      turn_started_at?: number | null;
-      turns_completed: boolean;
-    }>(config, "/api/offline/turn/status", { session_id: sessionId }),
+    post<OfflineTurnStatus>(config, "/api/offline/turn/status", { session_id: sessionId }),
 
   offlineTurnStart: (config: ApiConfig, sessionId: string) =>
-    post<{
-      timer_enabled: boolean;
-      turn_time_seconds?: number | null;
-      current_turn_index: number;
-      current_player_number: number;
-      turn_started_at?: number | null;
-      turns_completed: boolean;
-    }>(config, "/api/offline/turn/start", { session_id: sessionId }),
+    post<OfflineTurnStatus>(config, "/api/offline/turn/start", { session_id: sessionId }),
+
+  offlineTurnFinish: (config: ApiConfig, sessionId: string) =>
+    post<OfflineTurnStatus>(config, "/api/offline/turn/finish", { session_id: sessionId }),
 
   roomCreate: (
     config: ApiConfig,
@@ -136,6 +136,9 @@ export const api = {
 
   roomTurnStart: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/turn/start", { room_code: roomCode }),
+
+  roomTurnFinish: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/turn/finish", { room_code: roomCode }),
 
   roomRole: (config: ApiConfig, roomCode: string) =>
     post<{ role: "spy" | "card"; card?: string; image_url?: string; elixir_cost?: number | null }>(
