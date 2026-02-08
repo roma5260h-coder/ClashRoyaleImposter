@@ -20,4 +20,4 @@ COPY bot/ ./bot/
 COPY --from=webapp-builder /app/webapp/dist ./backend/webapp_dist
 
 EXPOSE 8080
-CMD ["sh", "-c", "python -m bot.main & uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "python -m bot.main & uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]

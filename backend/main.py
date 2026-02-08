@@ -3,8 +3,10 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -50,6 +52,8 @@ DEBUG_RANDOM = os.getenv("DEBUG_RANDOM", "0") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("spy_game")
+APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+ROOM_DEBUG = os.getenv("ROOM_DEBUG", "0") == "1" or APP_ENV in {"dev", "development", "local"}
 
 app = FastAPI(title="Spy Game API")
 
@@ -379,12 +383,39 @@ def fetch_remote_image(url: str) -> Dict[str, object]:
     return {"content": content, "content_type": content_type}
 
 
+def normalizeRoomCode(code: str) -> str:
+    normalized = unicodedata.normalize("NFKC", code or "")
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized = "".join(ch for ch in normalized if ch.isalnum())
+    return normalized.upper()
+
+
+def room_storage_keys_preview(limit: int = 30) -> List[str]:
+    keys = sorted(rooms.keys())
+    if len(keys) <= limit:
+        return keys
+    return keys[:limit] + ["..."]
+
+
+def debug_room_storage(event: str, raw_code: Optional[str], normalized_code: Optional[str]) -> None:
+    if not ROOM_DEBUG:
+        return
+    logger.info(
+        "[room_debug] %s raw=%r normalized=%r total_rooms=%s keys=%s",
+        event,
+        raw_code,
+        normalized_code,
+        len(rooms),
+        room_storage_keys_preview(),
+    )
+
+
 def generate_room_code() -> str:
     for _ in range(5):
-        code = uuid.uuid4().hex[:6].upper()
+        code = normalizeRoomCode(uuid.uuid4().hex[:6])
         if code not in rooms:
             return code
-    return uuid.uuid4().hex[:8].upper()
+    return normalizeRoomCode(uuid.uuid4().hex[:8])
 
 
 def normalize_timer_settings(timer_enabled: bool, turn_time_seconds: Optional[int]) -> Tuple[bool, Optional[int]]:
@@ -514,6 +545,10 @@ def remove_room_participant(room: RoomSession, user_id: int, reason_message: str
 
 
 def drop_stale_room_players(room: RoomSession) -> bool:
+    if room.state == ROOM_STATE_WAITING:
+        # Do not auto-expire waiting lobby participants; otherwise freshly created rooms
+        # may disappear before the second player joins.
+        return False
     now = time.time()
     stale_user_ids = [
         user_id
@@ -985,7 +1020,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         request.timer_enabled, request.turn_time_seconds
     )
 
-    room_code = generate_room_code()
+    room_code = normalizeRoomCode(generate_room_code())
     owner_entry = build_player_entry(user, 1)
     room = RoomSession(
         room_code=room_code,
@@ -1007,6 +1042,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
     room.players[user_id] = owner_entry
     touch_room_user(room, user_id)
     rooms[room_code] = room
+    debug_room_storage("create", room_code, room_code)
 
     return room_to_info(room, user_id)
 
@@ -1017,11 +1053,17 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    raw_room_code = request.room_code
+    room_code = normalizeRoomCode(raw_room_code)
+    debug_room_storage("join:before_lookup", raw_room_code, room_code)
+
+    room = rooms.get(room_code)
     if not room:
+        debug_room_storage("join:not_found", raw_room_code, room_code)
         raise HTTPException(status_code=404, detail="Комната не найдена")
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
+        debug_room_storage("join:removed_stale_room", raw_room_code, room_code)
         raise HTTPException(status_code=404, detail="Комната не найдена")
     if room.format_mode != "online":
         raise HTTPException(status_code=400, detail="Эта комната доступна только в онлайн-режиме")
@@ -1044,6 +1086,7 @@ async def room_join(request: RoomJoinRequest) -> RoomInfo:
         entry = build_player_entry(user, len(room.players) + 1)
         room.players[user_id] = entry
     touch_room_user(room, user_id)
+    debug_room_storage("join:success", raw_room_code, room_code)
 
     return room_to_info(room, user_id)
 
@@ -1054,14 +1097,15 @@ async def room_status(request: RoomActionRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     if user_id not in room.players:
         raise HTTPException(status_code=403, detail="Вы вышли из комнаты")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
 
     return room_to_info(room, user_id)
@@ -1073,12 +1117,13 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can start")
@@ -1131,7 +1176,8 @@ async def room_role(request: RoomActionRequest) -> RoomRoleResponse:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     if room.state not in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED):
@@ -1140,7 +1186,7 @@ async def room_role(request: RoomActionRequest) -> RoomRoleResponse:
         raise HTTPException(status_code=403, detail="Not in room")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
 
     card = room.cards_by_user.get(user_id)
@@ -1156,12 +1202,13 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can restart")
@@ -1212,12 +1259,13 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     if room.state == ROOM_STATE_PAUSED:
         raise HTTPException(status_code=400, detail="Игра на паузе")
@@ -1248,12 +1296,13 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     if room.state not in (ROOM_STATE_STARTED, ROOM_STATE_PAUSED):
         raise HTTPException(status_code=400, detail="Game not started")
@@ -1277,7 +1326,8 @@ async def room_resume(request: RoomActionRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     if room.owner_user_id != user_id:
@@ -1286,7 +1336,7 @@ async def room_resume(request: RoomActionRequest) -> RoomInfo:
         raise HTTPException(status_code=403, detail="Not in room")
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     if room.state != ROOM_STATE_PAUSED:
         raise HTTPException(status_code=400, detail="Игра не на паузе")
@@ -1305,7 +1355,8 @@ async def room_heartbeat(request: RoomActionRequest) -> RoomInfo:
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
 
-    room = rooms.get(request.room_code.upper())
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     if user_id not in room.players:
@@ -1313,7 +1364,7 @@ async def room_heartbeat(request: RoomActionRequest) -> RoomInfo:
 
     touch_room_user(room, user_id)
     if drop_stale_room_players(room):
-        rooms.pop(request.room_code.upper(), None)
+        rooms.pop(room_code, None)
         raise HTTPException(status_code=404, detail="Room not found")
     return room_to_info(room, user_id)
 
@@ -1323,7 +1374,7 @@ async def room_leave(request: RoomActionRequest) -> RoomLeaveResponse:
     cleanup_sessions()
     user = verify_init_data(request.initData)
     user_id = int(user.get("id", 0))
-    room_code = request.room_code.upper()
+    room_code = normalizeRoomCode(request.room_code)
 
     room = rooms.get(room_code)
     if not room:

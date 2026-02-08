@@ -38,9 +38,11 @@ BOT_TOKEN=123456789:ABCdefGHIjklmNOPqrsTUVwxyZ
 WEBAPP_URL=https://your-domain.tld
 WEBAPP_ORIGINS=https://your-domain.tld,http://localhost:5173
 INIT_DATA_BYPASS=0
+ROOM_DEBUG=0
 ```
 
 `INIT_DATA_BYPASS=1` — только для локальной разработки, отключает проверку подписи initData.
+`ROOM_DEBUG=1` или `APP_ENV=dev` — включает диагностические логи create/join по комнатам.
 
 ## 🚀 Запуск backend
 
@@ -52,8 +54,12 @@ pip install -r requirements.txt
 
 # из корня проекта (чтобы .env считался)
 cd /Users/nikita/Desktop/ClashRoyalBot
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000 --workers 1
 ```
+
+Важно для online-комнат с in-memory storage:
+- держи `workers=1`;
+- в Railway выставь `replicas=1` для этого сервиса, иначе create/join может попадать в разные инстансы.
 
 ## 🧩 Запуск Mini App (React)
 

@@ -44,12 +44,21 @@ const RANDOM_SCENARIOS = [
 ];
 
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
+const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
     return err.message;
   }
   return fallback;
+}
+
+function normalizeRoomCode(code: string): string {
+  return (code ?? "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[^0-9a-zA-Z]/g, "")
+    .toUpperCase();
 }
 
 export default function App() {
@@ -574,6 +583,14 @@ export default function App() {
     }
 
     setError(null);
+    if (ROOM_DEV_LOGS) {
+      console.info("[room_debug] create request", {
+        baseUrl: apiBase || "(same-origin)",
+        endpoint: `${apiBase || ""}/api/room/create`,
+        gameMode,
+        playerLimit: roomPlayerLimit,
+      });
+    }
 
     try {
       const info = await api.roomCreate(
@@ -594,19 +611,32 @@ export default function App() {
   };
 
   const handleJoinRoom = async () => {
-    if (!roomCodeInput) return;
+    const normalizedCode = normalizeRoomCode(roomCodeInput);
+    if (!normalizedCode) {
+      setError("Введите корректный код комнаты");
+      return;
+    }
     if (format !== "online") {
       setError("Сначала выбери формат и режим");
       return;
     }
 
     setError(null);
+    if (ROOM_DEV_LOGS) {
+      console.info("[room_debug] join request", {
+        baseUrl: apiBase || "(same-origin)",
+        endpoint: `${apiBase || ""}/api/room/join`,
+        rawCode: roomCodeInput,
+        normalizedCode,
+      });
+    }
 
     try {
-      const info = await api.roomJoin(apiConfig, roomCodeInput.toUpperCase());
+      const info = await api.roomJoin(apiConfig, normalizedCode);
       setRoomInfo(info);
       setGameMode(info.play_mode);
       setRoomStarter(null);
+      setRoomCodeInput(normalizedCode);
       setScreen(info.state === "waiting" ? "room" : "roomGame");
     } catch (err) {
       setError(toUserError(err, "Не удалось подключиться"));
@@ -1144,21 +1174,21 @@ export default function App() {
             )}
 
             {screen === "room" && roomInfo && (
-              <div className="card center">
+              <div className="card center room-lobby-card">
                 <div className="title">
                   Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
                 </div>
-                <p className="text">Хост: {roomInfo.host_name || roomInfo.owner_name}</p>
-                <p className="text">Игроков: {roomInfo.player_count}</p>
-                <p className="text">Лимит: {roomInfo.player_limit ?? MAX_PLAYERS}</p>
-                <p className="text">Начинает: {starterDisplayName ?? "определится после старта"}</p>
 
                 <div className="players">
                   {roomInfo.players.map((player) => (
-                    <div key={player.user_id} className="player">
-                      {player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}
+                    <div key={player.user_id} className="player player-row">
+                      <span>{player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram"}</span>
+                      {player.user_id === roomInfo.owner_user_id && <span className="host-badge">хост</span>}
                     </div>
                   ))}
+                </div>
+                <div className="lobby-counter">
+                  {roomInfo.player_count} / {roomInfo.player_limit ?? MAX_PLAYERS}
                 </div>
 
                 {roomInfo.can_start ? (
