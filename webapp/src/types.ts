@@ -13,4 +13,6 @@ export type RoomInfo = {
   can_start: boolean;
   you_are_owner: boolean;
   starter_name?: string | null;
+  discussion_time_seconds?: number | null;
+  discussion_started_at?: number | null;
 };

@@ -9,6 +9,7 @@ type Screen =
   | "format"
   | "playMode"
   | "randomInfo"
+  | "timerSetup"
   | "offlinePlayers"
   | "offlinePlayer"
   | "offlineRole"
@@ -33,6 +34,9 @@ export default function App() {
   const [gameMode, setGameMode] = useState<GameMode | null>(null);
   const [randomAllowed, setRandomAllowed] = useState<string[]>(() => RANDOM_SCENARIOS.map((s) => s.id));
   const [randomFlow, setRandomFlow] = useState<"offline" | "onlineCreate" | null>(null);
+  const [discussionTime, setDiscussionTime] = useState<number>(25);
+  const [timerContext, setTimerContext] = useState<"offline" | "onlineCreateStandard" | "onlineCreateRandom" | null>(null);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState<number | null>(null);
 
   const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<number>(1);
@@ -46,6 +50,9 @@ export default function App() {
   const [roomRole, setRoomRole] = useState<{ role: string; card?: string; image_url?: string; elixir_cost?: number | null } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
+  const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null);
+  const [timerTotal, setTimerTotal] = useState<number | null>(null);
+  const [timerRemaining, setTimerRemaining] = useState<number | null>(null);
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
@@ -133,10 +140,45 @@ export default function App() {
     setRoomImageOk(true);
   }, [roomRole?.image_url, roomRole?.role]);
 
+  const startTimer = (totalSeconds: number, startedAtMs?: number) => {
+    const startAt = startedAtMs ?? Date.now();
+    setTimerTotal(totalSeconds);
+    setTimerEndsAt(startAt + totalSeconds * 1000);
+  };
+
+  useEffect(() => {
+    if (!timerEndsAt || !timerTotal) {
+      setTimerRemaining(null);
+      return;
+    }
+    const tick = () => {
+      const msLeft = timerEndsAt - Date.now();
+      const secondsLeft = Math.max(0, Math.ceil(msLeft / 1000));
+      setTimerRemaining(secondsLeft);
+    };
+    tick();
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [timerEndsAt, timerTotal]);
+
+  useEffect(() => {
+    if (!roomInfo || roomInfo.state !== "started") return;
+    const total = roomInfo.discussion_time_seconds ?? 25;
+    if (!roomInfo.discussion_started_at) return;
+    const endAt = roomInfo.discussion_started_at * 1000 + total * 1000;
+    if (timerEndsAt !== endAt) {
+      setTimerTotal(total);
+      setTimerEndsAt(endAt);
+    }
+  }, [roomInfo?.state, roomInfo?.discussion_started_at, roomInfo?.discussion_time_seconds, timerEndsAt]);
+
   const resetAll = () => {
     setFormat(null);
     setGameMode(null);
     setRandomFlow(null);
+    setDiscussionTime(25);
+    setTimerContext(null);
+    setPendingOfflineCount(null);
     setOfflineSessionId(null);
     setOfflineRole(null);
     setStarterPlayer(null);
@@ -145,6 +187,9 @@ export default function App() {
     setRoomStarter(null);
     setRoomCodeInput("");
     setStatus(null);
+    setTimerEndsAt(null);
+    setTimerTotal(null);
+    setTimerRemaining(null);
     setScreen("format");
   };
 
@@ -164,6 +209,7 @@ export default function App() {
         apiConfig,
         gameMode,
         count,
+        discussionTime,
         gameMode === "random" ? randomAllowed : undefined
       );
       setOfflineSessionId(res.session_id);
@@ -172,6 +218,17 @@ export default function App() {
     } catch (err: any) {
       setError(err.message || "Не удалось начать игру");
     }
+  };
+
+  const openTimerForOffline = (count: number) => {
+    setPendingOfflineCount(count);
+    setTimerContext("offline");
+    setScreen("timerSetup");
+  };
+
+  const openTimerForOnline = (fromRandom: boolean) => {
+    setTimerContext(fromRandom ? "onlineCreateRandom" : "onlineCreateStandard");
+    setScreen("timerSetup");
   };
 
   const handleReveal = async () => {
@@ -187,6 +244,22 @@ export default function App() {
     }
   };
 
+  const handleTimerBack = () => {
+    if (timerContext === "offline") {
+      setScreen("offlinePlayers");
+      return;
+    }
+    if (timerContext === "onlineCreateStandard") {
+      setScreen("onlineMenu");
+      return;
+    }
+    if (timerContext === "onlineCreateRandom") {
+      setScreen("randomInfo");
+      return;
+    }
+    setScreen("playMode");
+  };
+
   const handleClose = async () => {
     if (!offlineSessionId) return;
     setError(null);
@@ -194,6 +267,7 @@ export default function App() {
       const res = await api.offlineClose(apiConfig, offlineSessionId);
       if (res.finished) {
         setStarterPlayer(res.starter_player_number ?? null);
+        startTimer(discussionTime);
         setScreen("offlineFinished");
       } else if (res.current_player_number) {
         setCurrentPlayer(res.current_player_number);
@@ -215,6 +289,7 @@ export default function App() {
         apiConfig,
         format,
         gameMode,
+        discussionTime,
         gameMode === "random" ? randomAllowed : undefined
       );
       setRoomInfo(info);
@@ -232,7 +307,22 @@ export default function App() {
       setScreen("randomInfo");
       return;
     }
-    await createRoomNow();
+    openTimerForOnline(false);
+  };
+
+  const handleTimerContinue = async () => {
+    if (timerContext === "offline") {
+      if (!pendingOfflineCount) return;
+      const count = pendingOfflineCount;
+      setTimerContext(null);
+      setPendingOfflineCount(null);
+      await handleStartOffline(count);
+      return;
+    }
+    if (timerContext === "onlineCreateStandard" || timerContext === "onlineCreateRandom") {
+      setTimerContext(null);
+      await createRoomNow();
+    }
   };
 
   const handleJoinRoom = async () => {
@@ -272,6 +362,9 @@ export default function App() {
     setError(null);
     setStatus("Новая игра начинается…");
     try {
+      setTimerEndsAt(null);
+      setTimerTotal(null);
+      setTimerRemaining(null);
       const res = await api.roomRestart(apiConfig, roomInfo.room_code);
       setRoomStarter(`Игру начинает: ${res.starter_name}`);
       const info = await api.roomStatus(apiConfig, roomInfo.room_code);
@@ -288,6 +381,9 @@ export default function App() {
     setError(null);
     setStatus("Новая игра начинается…");
     try {
+      setTimerEndsAt(null);
+      setTimerTotal(null);
+      setTimerRemaining(null);
       const res = await api.offlineRestart(apiConfig, offlineSessionId);
       setOfflineSessionId(res.session_id);
       setCurrentPlayer(res.current_player_number);
@@ -315,6 +411,30 @@ export default function App() {
   };
 
   const isHome = screen === "format";
+  const timerActive = timerTotal !== null && timerRemaining !== null;
+  const timerProgress =
+    timerActive && timerTotal
+      ? Math.max(0, Math.min(100, (timerRemaining! / timerTotal) * 100))
+      : 0;
+  const timerButtonLabel = timerContext === "offline" ? "Начать игру" : "Создать комнату";
+  const renderTimer = () => {
+    if (!timerActive) return null;
+    return (
+      <div className="timer">
+        <div className="timer-meta">
+          <span>Время обсуждения</span>
+          {timerRemaining === 0 ? (
+            <span className="timer-ended">Время вышло</span>
+          ) : (
+            <span className="timer-value">{timerRemaining} сек</span>
+          )}
+        </div>
+        <div className="timer-bar">
+          <div className="timer-fill" style={{ width: `${timerProgress}%` }} />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={`app ${isHome ? "bg-home" : "bg-game"}`}>
@@ -441,7 +561,7 @@ export default function App() {
               onClick={() => {
                 if (randomFlow === "onlineCreate") {
                   setRandomFlow(null);
-                  createRoomNow();
+                  openTimerForOnline(true);
                   return;
                 }
                 setRandomFlow("offline");
@@ -456,12 +576,37 @@ export default function App() {
         </div>
       )}
 
+      {screen === "timerSetup" && (
+        <div className="card center">
+          <div className="title">Выберите, сколько будет дано времени на подсказку</div>
+          <div className="timer-setup">
+            <div className="timer-setup-value">{discussionTime} секунд</div>
+            <input
+              className="timer-slider"
+              type="range"
+              min={10}
+              max={120}
+              step={5}
+              value={discussionTime}
+              onChange={(e) => setDiscussionTime(Number(e.target.value))}
+            />
+            <div className="timer-setup-range">10–120 сек</div>
+          </div>
+          <div className="actions">
+            <button className="btn full" onClick={handleTimerContinue}>
+              {timerButtonLabel}
+            </button>
+          </div>
+          <button className="link" onClick={handleTimerBack}>Назад</button>
+        </div>
+      )}
+
       {screen === "offlinePlayers" && (
         <div className="card center">
           <div className="title">Сколько игроков?</div>
           <div className="grid">
             {Array.from({ length: 10 }, (_, i) => i + 3).map((count) => (
-              <button key={count} className="btn small" onClick={() => handleStartOffline(count)}>
+              <button key={count} className="btn small" onClick={() => openTimerForOffline(count)}>
                 {count}
               </button>
             ))}
@@ -530,6 +675,7 @@ export default function App() {
         <div className="card center">
           <div className="title">Роли розданы</div>
           <p className="text">Игру начинает: Игрок {starterPlayer ?? "?"}</p>
+          {renderTimer()}
           <div className="actions">
             <button className="btn" onClick={handleRestartOffline}>Сыграть ещё</button>
             <button className="btn" onClick={resetAll}>Новая игра</button>
@@ -598,6 +744,8 @@ export default function App() {
               )}
             </div>
           )}
+
+          {roomInfo.state === "started" && renderTimer()}
 
           {roomStarter && <div className="hint">{roomStarter}</div>}
           <button className="link" onClick={resetAll}>Новая игра</button>

@@ -35,13 +35,20 @@ async function post<T>(config: ApiConfig, path: string, body: Record<string, unk
 export const api = {
   auth: (config: ApiConfig) => post<{ user_id: number; username?: string; full_name?: string }>(config, "/api/auth", {}),
 
-  offlineStart: (config: ApiConfig, gameMode: GameMode, playerCount: number, randomAllowed?: string[]) =>
-    post<{ session_id: string; current_player_number: number; player_count: number }>(
+  offlineStart: (
+    config: ApiConfig,
+    gameMode: GameMode,
+    playerCount: number,
+    discussionTimeSeconds: number,
+    randomAllowed?: string[]
+  ) =>
+    post<{ session_id: string; current_player_number: number; player_count: number; discussion_time_seconds: number }>(
       config,
       "/api/offline/start",
       {
         game_mode: gameMode,
         player_count: playerCount,
+        discussion_time_seconds: discussionTimeSeconds,
         ...(randomAllowed ? { random_allowed_modes: randomAllowed } : {}),
       }
     ),
@@ -66,10 +73,17 @@ export const api = {
       { session_id: sessionId }
     ),
 
-  roomCreate: (config: ApiConfig, formatMode: GameFormat, gameMode: GameMode, randomAllowed?: string[]) =>
+  roomCreate: (
+    config: ApiConfig,
+    formatMode: GameFormat,
+    gameMode: GameMode,
+    discussionTimeSeconds: number,
+    randomAllowed?: string[]
+  ) =>
     post<RoomInfo>(config, "/api/room/create", {
       format_mode: formatMode,
       game_mode: gameMode,
+      discussion_time_seconds: discussionTimeSeconds,
       ...(randomAllowed ? { random_allowed_modes: randomAllowed } : {}),
     }),
 

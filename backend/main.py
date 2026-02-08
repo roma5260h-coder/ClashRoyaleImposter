@@ -64,12 +64,14 @@ class OfflineStartRequest(BaseRequest):
     game_mode: str
     player_count: int
     random_allowed_modes: Optional[List[str]] = None
+    discussion_time_seconds: int = 25
 
 
 class OfflineStartResponse(BaseModel):
     session_id: str
     current_player_number: int
     player_count: int
+    discussion_time_seconds: int
 
 
 class OfflineRevealRequest(BaseRequest):
@@ -102,6 +104,7 @@ class RoomCreateRequest(BaseRequest):
     format_mode: str
     game_mode: str
     random_allowed_modes: Optional[List[str]] = None
+    discussion_time_seconds: int = 25
 
 
 class RoomJoinRequest(BaseRequest):
@@ -133,6 +136,8 @@ class RoomInfo(BaseModel):
     can_start: bool
     you_are_owner: bool
     starter_name: Optional[str] = None
+    discussion_time_seconds: int = 25
+    discussion_started_at: Optional[float] = None
 
 
 class RoomStartResponse(BaseModel):
@@ -160,6 +165,7 @@ class OfflineSession:
     resolved_random_mode: Optional[str]
     player_count: int
     current_player_number: int
+    discussion_time_seconds: int
     spy_players: List[int] = field(default_factory=list)
     cards_for_players: Dict[int, Optional[str]] = field(default_factory=dict)
     random_allowed_modes: List[str] = field(default_factory=list)
@@ -177,6 +183,8 @@ class RoomSession:
     players: Dict[int, Dict[str, Optional[str]]] = field(default_factory=dict)
     resolved_random_mode: Optional[str] = None
     random_allowed_modes: List[str] = field(default_factory=list)
+    discussion_time_seconds: int = 25
+    discussion_started_at: Optional[float] = None
     spy_user_ids: List[int] = field(default_factory=list)
     cards_by_user: Dict[int, Optional[str]] = field(default_factory=dict)
     state: str = "waiting"
@@ -346,6 +354,7 @@ async def offline_start(request: OfflineStartRequest) -> OfflineStartResponse:
         resolved_random_mode=resolved_mode,
         player_count=request.player_count,
         current_player_number=1,
+        discussion_time_seconds=request.discussion_time_seconds,
         spy_players=spies,
         cards_for_players=cards_for_players,
         random_allowed_modes=random_allowed or [],
@@ -355,6 +364,7 @@ async def offline_start(request: OfflineStartRequest) -> OfflineStartResponse:
         session_id=session_id,
         current_player_number=1,
         player_count=request.player_count,
+        discussion_time_seconds=request.discussion_time_seconds,
     )
 
 
@@ -483,6 +493,7 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
         format_mode=request.format_mode,
         play_mode=request.game_mode,
         random_allowed_modes=random_allowed or [],
+        discussion_time_seconds=request.discussion_time_seconds,
     )
     room.players[user_id] = owner_entry
     rooms[room_code] = room
@@ -556,6 +567,7 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
     room.state = "started"
+    room.discussion_started_at = time.time()
 
     starter_user_id = random_choice(players)
     room.starter_user_id = starter_user_id
@@ -616,6 +628,7 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
     room.state = "started"
+    room.discussion_started_at = time.time()
     room.starter_user_id = random_choice(players)
 
     starter_entry = room.players.get(room.starter_user_id)
@@ -682,6 +695,8 @@ def room_to_info(room: RoomSession, user_id: int) -> RoomInfo:
         can_start=(room.owner_user_id == user_id and room.state == "waiting" and len(room.players) >= MIN_PLAYERS),
         you_are_owner=(room.owner_user_id == user_id),
         starter_name=starter_name,
+        discussion_time_seconds=room.discussion_time_seconds,
+        discussion_started_at=room.discussion_started_at,
     )
 
 
