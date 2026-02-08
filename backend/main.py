@@ -60,7 +60,7 @@ NODE_ENV = os.getenv("NODE_ENV", "").strip().lower()
 DEV_TOOLS_ENABLED = (
     os.getenv("DEV_TOOLS_ENABLED", "0") == "1"
     or APP_ENV in {"dev", "development", "local", "test"}
-    or (NODE_ENV and NODE_ENV != "production")
+    or bool(NODE_ENV and NODE_ENV != "production")
 )
 
 
@@ -1722,7 +1722,7 @@ def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None
         turn_started_at=room.turn_started_at,
         turns_completed=room.turns_completed,
         status_message=room.last_status_message,
-        can_manage_bots=(
+        can_manage_bots=bool(
             DEV_TOOLS_ENABLED
             and room.state == ROOM_STATE_WAITING
             and room.owner_user_id == user_id
