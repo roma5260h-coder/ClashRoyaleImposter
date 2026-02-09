@@ -1384,6 +1384,12 @@ export default function App() {
                     Ожидаем игроков
                   </div>
                 )}
+                {!roomInfo.you_are_owner &&
+                  roomInfo.player_count >= (roomInfo.player_limit ?? MAX_PLAYERS) && (
+                    <div className="lobby-helper">
+                      Ожидаем начала игры от {roomInfo.host_name || roomInfo.owner_name}
+                    </div>
+                  )}
 
                 {roomInfo.can_start && (
                   <div className="actions">
