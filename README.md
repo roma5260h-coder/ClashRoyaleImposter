@@ -38,6 +38,7 @@ BOT_TOKEN=123456789:ABCdefGHIjklmNOPqrsTUVwxyZ
 WEBAPP_URL=https://your-domain.tld
 WEBAPP_ORIGINS=https://your-domain.tld,http://localhost:5173
 INIT_DATA_BYPASS=0
+RUN_BOT_POLLING=0
 ROOM_DEBUG=0
 APP_ENV=production
 DEV_TOOLS_ENABLED=0
@@ -46,6 +47,7 @@ DEV_ADMIN_USERNAMES=gerafen
 ```
 
 `INIT_DATA_BYPASS=1` — только для локальной разработки, отключает проверку подписи initData.
+`RUN_BOT_POLLING=1` — запускать long polling бота в этом же контейнере. На Railway обычно оставляй `0`, если бот уже запущен где-то ещё.
 `ROOM_DEBUG=1` или `APP_ENV=dev` — включает диагностические логи create/join по комнатам.
 `DEV_TOOLS_ENABLED=1` + `DEV_ADMIN_IDS`/`DEV_ADMIN_USERNAMES` — включает DEV endpoints для добавления/очистки ботов в лобби (только хост и только для указанных Telegram ID/username).
 
@@ -65,6 +67,7 @@ uvicorn backend.main:app --reload --port 8000 --workers 1
 Важно для online-комнат с in-memory storage:
 - держи `workers=1`;
 - в Railway выставь `replicas=1` для этого сервиса, иначе create/join может попадать в разные инстансы.
+- если в логах есть `TelegramConflictError: terminated by other getUpdates request`, значит этот же `BOT_TOKEN` уже поллится в другом процессе/сервисе. Для backend-сервиса на Railway поставь `RUN_BOT_POLLING=0`.
 
 ## 🧩 Запуск Mini App (React)
 

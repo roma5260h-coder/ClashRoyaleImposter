@@ -10,6 +10,7 @@ RUN npm run build
 FROM python:3.11-slim AS runtime
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
+ENV RUN_BOT_POLLING=0
 
 COPY backend/requirements.txt ./backend/requirements.txt
 COPY bot/requirements.txt ./bot/requirements.txt
@@ -20,4 +21,4 @@ COPY bot/ ./bot/
 COPY --from=webapp-builder /app/webapp/dist ./backend/webapp_dist
 
 EXPOSE 8080
-CMD ["sh", "-c", "python -m bot.main & uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
+CMD ["sh", "-c", "if [ \"${RUN_BOT_POLLING:-0}\" = \"1\" ]; then echo \"Starting Telegram bot polling\"; python -m bot.main & else echo \"RUN_BOT_POLLING=0, skip bot polling\"; fi; exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
