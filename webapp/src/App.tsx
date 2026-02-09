@@ -79,7 +79,7 @@ export default function App() {
   const [format, setFormat] = useState<GameFormat | null>(null);
   const [gameMode, setGameMode] = useState<GameMode | null>(null);
   const [randomAllowed, setRandomAllowed] = useState<string[]>(DEFAULT_RANDOM_ALLOWED);
-  const [roomPlayerLimit, setRoomPlayerLimit] = useState<number>(MAX_PLAYERS);
+  const [roomPlayerLimit, setRoomPlayerLimit] = useState<number | null>(null);
 
   const [timerEnabled, setTimerEnabled] = useState<boolean>(false);
   const [turnTimeSeconds, setTurnTimeSeconds] = useState<number>(8);
@@ -515,7 +515,7 @@ export default function App() {
     setError(null);
     setFormat(null);
     setGameMode(null);
-    setRoomPlayerLimit(MAX_PLAYERS);
+    setRoomPlayerLimit(null);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
     clearSessionData();
@@ -528,7 +528,7 @@ export default function App() {
     setFormat(nextFormat);
     setGameMode(null);
     setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
-    setRoomPlayerLimit(MAX_PLAYERS);
+    setRoomPlayerLimit(null);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
     setScreen("playMode");
@@ -538,7 +538,7 @@ export default function App() {
     setError(null);
     setGameMode("standard");
     setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
-    setRoomPlayerLimit(MAX_PLAYERS);
+    setRoomPlayerLimit(null);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
 
@@ -554,7 +554,7 @@ export default function App() {
     setError(null);
     setGameMode("random");
     setRandomAllowed(DEFAULT_RANDOM_ALLOWED);
-    setRoomPlayerLimit(MAX_PLAYERS);
+    setRoomPlayerLimit(null);
     setTimerEnabled(false);
     setTurnTimeSeconds(8);
 
@@ -685,7 +685,7 @@ export default function App() {
       setError("Сначала выбери формат и режим");
       return;
     }
-    if (roomPlayerLimit < MIN_PLAYERS || roomPlayerLimit > MAX_PLAYERS) {
+    if (roomPlayerLimit === null || roomPlayerLimit < MIN_PLAYERS || roomPlayerLimit > MAX_PLAYERS) {
       setError("Выберите корректный лимит игроков");
       return;
     }
@@ -1109,7 +1109,13 @@ export default function App() {
                 </div>
                 <p className="text">Выберите, что хотите сделать.</p>
                 <div className="actions stack">
-                  <button className="btn full" onClick={() => setScreen("roomCreateSettings")}>
+                  <button
+                    className="btn full"
+                    onClick={() => {
+                      setRoomPlayerLimit(null);
+                      setScreen("roomCreateSettings");
+                    }}
+                  >
                     Создать комнату
                   </button>
                   <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
@@ -1143,6 +1149,7 @@ export default function App() {
                       )
                     )}
                   </div>
+                  {roomPlayerLimit === null && <div className="hint">Сначала выберите лимит игроков</div>}
                 </div>
 
                 {gameMode === "random" && (
@@ -1178,7 +1185,11 @@ export default function App() {
                 {renderTimerSetup()}
 
                 <div className="actions stack">
-                  <button className="btn full" onClick={createRoomNow} disabled={gameMode === "random" && randomAllowed.length < 2}>
+                  <button
+                    className="btn full"
+                    onClick={createRoomNow}
+                    disabled={roomPlayerLimit === null || (gameMode === "random" && randomAllowed.length < 2)}
+                  >
                     Создать
                   </button>
                 </div>
