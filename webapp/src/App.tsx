@@ -1388,19 +1388,17 @@ export default function App() {
                 <div className="lobby-counter">
                   {roomInfo.player_count} / {roomInfo.player_limit ?? MAX_PLAYERS}
                 </div>
-                {roomInfo.player_count < (roomInfo.player_limit ?? MAX_PLAYERS) && (
-                  <div className="lobby-helper">
-                    Поделитесь кодом для подключения
-                    <br />
-                    Ожидаем игроков
-                  </div>
-                )}
-                {!roomInfo.you_are_owner &&
-                  roomInfo.player_count >= (roomInfo.player_limit ?? MAX_PLAYERS) && (
+                {roomInfo.you_are_owner ? (
+                  roomInfo.player_count < (roomInfo.player_limit ?? MAX_PLAYERS) && (
                     <div className="lobby-helper">
-                      Ожидаем начала игры от {roomInfo.host_name || roomInfo.owner_name}
+                      Поделитесь кодом для подключения
+                      <br />
+                      Ожидаем игроков
                     </div>
-                  )}
+                  )
+                ) : (
+                  <div className="lobby-helper">Ожидаем игроков</div>
+                )}
 
                 {roomInfo.can_start && (
                   <div className="actions">
