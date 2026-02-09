@@ -1040,7 +1040,7 @@ export default function App() {
               <div className="logo">Clash Royale Шпион</div>
               {showTopBackButton && (
                 <button className="top-back-btn" onClick={handleTopBack}>
-                  Назад
+                  ← Назад
                 </button>
               )}
             </header>
