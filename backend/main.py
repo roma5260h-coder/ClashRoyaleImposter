@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 import time
 import unicodedata
 import uuid
@@ -49,6 +50,8 @@ ROOM_STATE_PAUSED = "paused"
 HEARTBEAT_STALE_SECONDS = 20
 BOT_ID_PREFIX = "bot_"
 BOT_NAME_PATTERN = re.compile(r"^Bot (\d+)$")
+DEFAULT_SUBSCRIBERS_DB_PATH = Path(__file__).resolve().parent.parent / "bot" / "subscribers.db"
+_subscribers_db_initialized = False
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 INIT_DATA_BYPASS = os.getenv("INIT_DATA_BYPASS", "0") == "1"
@@ -376,6 +379,92 @@ def cleanup_sessions() -> None:
 
 def parse_init_data(init_data: str) -> Dict[str, str]:
     return dict(parse_qsl(init_data, keep_blank_values=True))
+
+
+def resolve_subscribers_db_path() -> Path:
+    configured = os.getenv("BOT_USERS_DB_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return DEFAULT_SUBSCRIBERS_DB_PATH
+
+
+def connect_subscribers_db() -> sqlite3.Connection:
+    db_path = resolve_subscribers_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
+
+
+def ensure_subscribers_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subscribers (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            added_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            blocked_at INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_subscribers_active
+        ON subscribers (is_active, updated_at)
+        """
+    )
+
+
+def normalize_optional_text(value: object) -> Optional[str]:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized if normalized else None
+    return None
+
+
+def sync_subscriber_from_auth(user: Dict[str, object]) -> None:
+    global _subscribers_db_initialized
+
+    try:
+        user_id = int(user.get("id", 0) or 0)
+    except (TypeError, ValueError):
+        return
+
+    if user_id <= 0:
+        return
+
+    username = normalize_optional_text(user.get("username"))
+    first_name = normalize_optional_text(user.get("first_name"))
+    last_name = normalize_optional_text(user.get("last_name"))
+    now = int(time.time())
+
+    try:
+        with connect_subscribers_db() as conn:
+            if not _subscribers_db_initialized:
+                ensure_subscribers_schema(conn)
+                _subscribers_db_initialized = True
+            conn.execute(
+                """
+                INSERT INTO subscribers (user_id, username, first_name, last_name, is_active, added_at, updated_at, blocked_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?, NULL)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username=excluded.username,
+                    first_name=excluded.first_name,
+                    last_name=excluded.last_name,
+                    is_active=1,
+                    updated_at=excluded.updated_at,
+                    blocked_at=NULL
+                """,
+                (user_id, username, first_name, last_name, now, now),
+            )
+            conn.commit()
+    except Exception:
+        logger.exception("Failed to sync subscriber from /api/auth user_id=%s", user_id)
 
 
 def verify_init_data(init_data: str) -> Dict[str, str]:
@@ -930,6 +1019,7 @@ async def health() -> Dict[str, str]:
 @app.post("/api/auth", response_model=AuthResponse)
 async def auth(request: BaseRequest) -> AuthResponse:
     user = verify_init_data(request.initData)
+    sync_subscriber_from_auth(user)
     return AuthResponse(
         user_id=int(user.get("id", 0)),
         username=user.get("username"),
