@@ -655,6 +655,9 @@ def drop_stale_room_players(room: RoomSession) -> bool:
         for user_id, last_seen in room.last_seen_by_user.items()
         if user_id in room.players and now - last_seen > HEARTBEAT_STALE_SECONDS
     ]
+    if room.owner_user_id in stale_user_ids:
+        set_room_status_message(room, "Хост вышел из комнаты")
+        return True
     for user_id in stale_user_ids:
         remove_room_participant(room, user_id, "вышел из комнаты")
     return len(room.players) == 0 or len(real_room_player_ids(room)) == 0
@@ -1515,6 +1518,43 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     )
 
 
+@app.post("/api/room/lobby", response_model=RoomInfo)
+async def room_return_to_lobby(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
+
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Only owner can reset room")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Not in room")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(room_code, None)
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    room.state = ROOM_STATE_WAITING
+    room.spy_user_ids = []
+    room.cards_by_user = {}
+    room.resolved_random_mode = None
+    room.starter_user_id = None
+    room.current_turn_index = 0
+    room.players_order = []
+    room.turn_active = False
+    room.turn_state = TURN_STATE_WAITING
+    room.turn_started_at = None
+    room.turns_completed = False
+    room.last_status_message = None
+    room.last_status_at = None
+
+    return room_to_info(room, user_id, username)
+
+
 @app.post("/api/room/turn/start", response_model=RoomInfo)
 async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     cleanup_sessions()
@@ -1647,6 +1687,10 @@ async def room_leave(request: RoomActionRequest) -> RoomLeaveResponse:
         return RoomLeaveResponse(left=True, room_closed=True)
     if user_id not in room.players:
         return RoomLeaveResponse(left=False, room_closed=False)
+
+    if room.owner_user_id == user_id:
+        del rooms[room_code]
+        return RoomLeaveResponse(left=True, room_closed=True)
 
     remove_room_participant(room, user_id, "вышел из комнаты")
     if not room.players or not real_room_player_ids(room):

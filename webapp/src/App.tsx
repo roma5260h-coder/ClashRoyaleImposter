@@ -61,6 +61,16 @@ function normalizeRoomCode(code: string): string {
     .toUpperCase();
 }
 
+function isRoomGoneError(message: string): boolean {
+  const normalized = (message || "").toLowerCase();
+  return (
+    normalized.includes("room not found") ||
+    normalized.includes("комната не найдена") ||
+    normalized.includes("вы вышли из комнаты") ||
+    normalized.includes("not in room")
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -193,8 +203,16 @@ export default function App() {
         if (screen === "room" && (info.state === "started" || info.state === "paused")) {
           setScreen("roomGame");
         }
-      } catch {
-        // ignore transient polling errors
+        if (screen === "roomGame" && info.state === "waiting") {
+          setScreen("room");
+        }
+      } catch (err) {
+        if (canceled) return;
+        const message = toUserError(err, "");
+        if (isRoomGoneError(message)) {
+          resetAll();
+          setError("Комната закрыта или вы вышли из неё");
+        }
       }
     };
 
@@ -218,8 +236,16 @@ export default function App() {
         if (screen === "room" && (info.state === "started" || info.state === "paused")) {
           setScreen("roomGame");
         }
-      } catch {
-        // ignore transient heartbeat errors
+        if (screen === "roomGame" && info.state === "waiting") {
+          setScreen("room");
+        }
+      } catch (err) {
+        if (canceled) return;
+        const message = toUserError(err, "");
+        if (isRoomGoneError(message)) {
+          resetAll();
+          setError("Комната закрыта или вы вышли из неё");
+        }
       }
     };
 
@@ -409,15 +435,18 @@ export default function App() {
       : 0;
   const timerSecondsLeft = turnRemainingMs === null ? null : Math.max(0, Math.ceil(turnRemainingMs / 1000));
   const starterDisplayName = roomInfo?.starter_name ?? roomStarter?.replace("Игру начинает: ", "") ?? null;
-  const roomTurnLoopVisible = Boolean(
-    roomInfo?.timer_enabled &&
-      (roomInfo.turn_state === "turn_loop_active" || roomInfo.state === "paused")
-  );
-  const roomTurnAwaitingStart = Boolean(
-    roomInfo?.timer_enabled &&
-      roomInfo.turn_state === "ready_to_start" &&
-      roomInfo.state === "started"
-  );
+  const roomPhase = useMemo<"ready" | "playing" | "paused" | "finished" | "fallback">(() => {
+    if (!roomInfo) return "fallback";
+    if (roomInfo.state === "paused") return "paused";
+    if (roomInfo.timer_enabled) {
+      if (roomInfo.turn_state === "ready_to_start") return "ready";
+      if (roomInfo.turn_state === "turn_loop_active") return "playing";
+      if (roomInfo.turn_state === "finished") return "finished";
+    }
+    if (roomInfo.turn_state === "finished") return "finished";
+    return "fallback";
+  }, [roomInfo]);
+  const roomCurrentTurnName = roomInfo?.current_turn_name ?? `Игрок ${(roomInfo?.current_turn_index ?? 0) + 1}`;
 
   const clearSessionData = () => {
     leaveSentRef.current = false;
@@ -810,6 +839,21 @@ export default function App() {
     } catch (err) {
       setStatus(null);
       setError(toUserError(err, "Не удалось перезапустить игру"));
+    }
+  };
+
+  const handleReturnRoomToLobby = async () => {
+    if (!roomInfo) return;
+    setError(null);
+    setStatus(null);
+
+    try {
+      const info = await api.roomToLobby(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+      setRoomStarter(null);
+      setScreen("room");
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
     }
   };
 
@@ -1301,8 +1345,8 @@ export default function App() {
                     ⋯
                   </button>
                 )}
-                <button className="link" onClick={resetAll}>
-                  Новая игра
+                <button className="leave-link" onClick={handleLeaveRoom}>
+                  Выйти из комнаты
                 </button>
               </div>
             )}
@@ -1339,86 +1383,100 @@ export default function App() {
             )}
 
             {screen === "roomGame" && roomInfo && (
-              <div className="card center room-game-card">
-                <div className="title">
-                  Код комнаты: <span className="room-code">{roomInfo.room_code}</span>
-                </div>
-                <p className="text">Хост: {roomInfo.host_name || roomInfo.owner_name}</p>
-
-                <div className="players">
-                  {roomInfo.players.map((player) => (
-                    <div key={player.user_id} className="player player-row">
-                      <span>{renderPlayerName(player)}</span>
-                      {String(player.user_id) === String(roomInfo.owner_user_id) && <span className="host-badge">хост</span>}
+              <div className={`card center room-game-card room-phase-${roomPhase}`}>
+                {roomPhase === "ready" && (
+                  <>
+                    <div className="room-phase-title">Начинает: {starterDisplayName ?? "—"}</div>
+                    <div className="actions stack">
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
+                      </button>
+                      <button
+                        className="btn secondary full"
+                        onClick={handleStartRoomTurn}
+                        disabled={!roomInfo.you_are_owner}
+                      >
+                        Начать игру
+                      </button>
                     </div>
-                  ))}
-                </div>
-                <div className="lobby-counter">
-                  {roomInfo.player_count} / {roomInfo.player_limit ?? MAX_PLAYERS}
-                </div>
+                    {!roomInfo.you_are_owner && (
+                      <button className="leave-link" onClick={handleLeaveRoom}>
+                        Выйти из комнаты
+                      </button>
+                    )}
+                  </>
+                )}
 
-                <div className="turn-board">
-                  {roomTurnLoopVisible && (
-                    <>
-                      <div className="text">Начинает: {starterDisplayName ?? "—"}</div>
-                      <div className="text">
-                        Сейчас ход: {roomInfo.current_turn_name ?? `Игрок ${(roomInfo.current_turn_index ?? 0) + 1}`}
+                {(roomPhase === "playing" || roomPhase === "paused") && (
+                  <>
+                    <div className="room-phase-title">Сейчас ход: {roomCurrentTurnName}</div>
+                    {roomInfo.timer_enabled && renderTurnProgress()}
+                    {roomInfo.state === "paused" && (
+                      <div className="hint danger">Игра на паузе. Таймер остановлен.</div>
+                    )}
+                    {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
+
+                    <div className="actions stack">
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
+                      </button>
+
+                      {roomInfo.you_are_owner && roomPhase === "paused" && (
+                        <button className="btn full" onClick={handleResumeRoom}>
+                          Продолжить игру
+                        </button>
+                      )}
+
+                      {roomInfo.you_are_owner && roomPhase === "playing" && (
+                        <button className="btn secondary full" onClick={handleFinishRoomTurn}>
+                          Игра окончена
+                        </button>
+                      )}
+                    </div>
+
+                    <button className="leave-link" onClick={handleLeaveRoom}>
+                      {roomInfo.you_are_owner ? "Выйти из лобби" : "Выйти из комнаты"}
+                    </button>
+                  </>
+                )}
+
+                {roomPhase === "finished" && (
+                  <>
+                    <div className="room-phase-title">Игра окончена</div>
+                    {roomInfo.you_are_owner ? (
+                      <div className="actions stack">
+                        <button className="btn full" onClick={handleRestartRoom}>
+                          Сыграть ещё
+                        </button>
+                        <button className="btn secondary full" onClick={handleReturnRoomToLobby}>
+                          Новая игра
+                        </button>
                       </div>
-                    </>
-                  )}
-                  {roomTurnAwaitingStart && (
-                    <div className="text">Нажмите «Запустить ходы», чтобы начать игру с таймером.</div>
-                  )}
+                    ) : (
+                      <>
+                        <div className="hint">Ожидаем действий хоста</div>
+                        <button className="leave-link" onClick={handleLeaveRoom}>
+                          Выйти из комнаты
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
 
-                  {roomInfo.timer_enabled && roomInfo.turn_state === "turn_loop_active" && roomInfo.state === "started" && renderTurnProgress()}
-
-                  {roomInfo.state === "paused" && (
-                    <div className="hint danger">
-                      Игра на паузе. Таймер остановлен.
+                {roomPhase === "fallback" && (
+                  <>
+                    <div className="room-phase-title">Игра запущена</div>
+                    {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
+                    <div className="actions stack">
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
+                      </button>
                     </div>
-                  )}
-                  {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
-                </div>
-
-                <div className="actions stack">
-                  <button className="btn" onClick={handleGetRole}>
-                    Показать карту
-                  </button>
-
-                  {roomInfo.timer_enabled &&
-                    roomInfo.turn_state === "ready_to_start" &&
-                    roomInfo.state === "started" &&
-                    roomInfo.you_are_owner && (
-                      <button className="btn" onClick={handleStartRoomTurn}>
-                        Запустить ходы
-                      </button>
-                    )}
-
-                  {roomInfo.state === "paused" && roomInfo.you_are_owner && (
-                    <button className="btn" onClick={handleResumeRoom}>
-                      Продолжить игру
+                    <button className="leave-link" onClick={handleLeaveRoom}>
+                      {roomInfo.you_are_owner ? "Выйти из лобби" : "Выйти из комнаты"}
                     </button>
-                  )}
-
-                  {roomInfo.timer_enabled &&
-                    roomInfo.turn_state === "turn_loop_active" &&
-                    roomInfo.state === "started" &&
-                    roomInfo.you_are_owner && (
-                      <button className="btn secondary" onClick={handleFinishRoomTurn}>
-                        Игра окончена
-                      </button>
-                    )}
-
-                  {roomInfo.you_are_owner && (!roomInfo.timer_enabled || roomInfo.turn_state === "finished") && (
-                    <button className="btn secondary" onClick={handleRestartRoom}>
-                      Сыграть ещё
-                    </button>
-                  )}
-                </div>
-
-                <button className="leave-link" onClick={handleLeaveRoom}>
-                  Выйти из комнаты
-                </button>
+                  </>
+                )}
               </div>
             )}
 

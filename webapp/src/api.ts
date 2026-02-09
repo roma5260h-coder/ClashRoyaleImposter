@@ -134,6 +134,9 @@ export const api = {
       { room_code: roomCode }
     ),
 
+  roomToLobby: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/lobby", { room_code: roomCode }),
+
   roomTurnStart: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/turn/start", { room_code: roomCode }),
 

@@ -480,6 +480,32 @@ body {
 
 .room-game-card {
   min-height: 72vh;
+  justify-content: center;
+}
+
+.room-phase-title {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.room-phase-playing .room-phase-title,
+.room-phase-paused .room-phase-title {
+  font-size: 28px;
+}
+
+.room-phase-finished .room-phase-title,
+.room-phase-fallback .room-phase-title {
+  font-size: 28px;
+}
+
+.room-phase-ready .actions,
+.room-phase-playing .actions,
+.room-phase-paused .actions,
+.room-phase-finished .actions,
+.room-phase-fallback .actions {
+  width: 100%;
 }
 
 .leave-link {
