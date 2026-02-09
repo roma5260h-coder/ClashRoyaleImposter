@@ -928,6 +928,32 @@ export default function App() {
     setScreen("onlineMenu");
   };
 
+  const showTopBackButton =
+    screen === "playMode" ||
+    screen === "randomInfo" ||
+    screen === "onlineMenu" ||
+    screen === "roomCreateSettings" ||
+    screen === "offlinePlayers" ||
+    screen === "joinRoom";
+
+  const handleTopBack = () => {
+    if (screen === "playMode") {
+      resetAll();
+      return;
+    }
+    if (screen === "randomInfo" || screen === "offlinePlayers" || screen === "onlineMenu") {
+      setScreen("playMode");
+      return;
+    }
+    if (screen === "roomCreateSettings") {
+      setScreen("onlineMenu");
+      return;
+    }
+    if (screen === "joinRoom") {
+      backFromJoin();
+    }
+  };
+
   const renderTurnProgress = () => {
     if (!timerActive || timerSecondsLeft === null) return null;
 
@@ -1010,6 +1036,12 @@ export default function App() {
 
         {!isHome && (
           <>
+            {showTopBackButton && (
+              <button className="top-back-btn" onClick={handleTopBack}>
+                Назад
+              </button>
+            )}
+
             <header className="header">
               <div className="logo">Clash Royale Шпион</div>
             </header>
@@ -1044,9 +1076,6 @@ export default function App() {
                     Рандом
                   </button>
                 </div>
-                <button className="link" onClick={resetAll}>
-                  Назад
-                </button>
               </div>
             )}
 
@@ -1096,10 +1125,6 @@ export default function App() {
                     Продолжить
                   </button>
                 </div>
-
-                <button className="link" onClick={() => setScreen("playMode")}>
-                  Назад
-                </button>
               </div>
             )}
 
@@ -1123,9 +1148,6 @@ export default function App() {
                     Подключиться
                   </button>
                 </div>
-                <button className="link" onClick={() => setScreen("playMode")}>
-                  Назад
-                </button>
               </div>
             )}
 
@@ -1194,10 +1216,6 @@ export default function App() {
                     Создать
                   </button>
                 </div>
-
-                <button className="link" onClick={() => setScreen("onlineMenu")}>
-                  Назад
-                </button>
               </div>
             )}
 
@@ -1225,8 +1243,6 @@ export default function App() {
                     Начать игру
                   </button>
                 </div>
-
-                <button className="link" onClick={() => setScreen("playMode")}>Назад</button>
               </div>
             )}
 
@@ -1363,9 +1379,6 @@ export default function App() {
                     Подключиться
                   </button>
                 </div>
-                <button className="link" onClick={backFromJoin}>
-                  Назад
-                </button>
               </div>
             )}
 

@@ -83,6 +83,25 @@ body {
   letter-spacing: 0.5px;
 }
 
+.top-back-btn {
+  align-self: flex-start;
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  backdrop-filter: blur(16px);
+  color: var(--danger);
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 10px 16px;
+  min-height: 42px;
+  min-width: 92px;
+  cursor: pointer;
+}
+
+.top-back-btn:hover {
+  filter: brightness(1.05);
+}
+
 .subtitle {
   color: var(--muted);
   font-size: 14px;
