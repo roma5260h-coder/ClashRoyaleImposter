@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiConfig } from "./api";
 import type { GameFormat, GameMode, RoomInfo, RoomPlayer, TurnState } from "./types";
 
@@ -112,8 +112,11 @@ export default function App() {
   const [roomCodeTapCount, setRoomCodeTapCount] = useState<number>(0);
   const [devActionLoading, setDevActionLoading] = useState<boolean>(false);
   const leaveSentRef = useRef<boolean>(false);
+  const toastSeqRef = useRef<number>(0);
+  const prevRoomInfoRef = useRef<RoomInfo | null>(null);
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
@@ -132,6 +135,15 @@ export default function App() {
       roomInfo.you_are_owner &&
       roomInfo.can_manage_bots
   );
+  const pushToast = useCallback((text: string) => {
+    const message = (text || "").trim();
+    if (!message) return;
+    const id = ++toastSeqRef.current;
+    setToasts((prev) => [...prev, { id, text: message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, 2800);
+  }, []);
 
   const renderPlayerName = (player: RoomPlayer) => {
     const baseName = player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram";
@@ -371,6 +383,36 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [roomCodeTapCount]);
 
+  useEffect(() => {
+    if (!roomInfo) {
+      prevRoomInfoRef.current = null;
+      return;
+    }
+
+    const prev = prevRoomInfoRef.current;
+    const statusMessage = roomInfo.status_message?.trim();
+    if (
+      statusMessage &&
+      statusMessage !== prev?.status_message &&
+      statusMessage.toLowerCase().includes("вышел из комнаты")
+    ) {
+      pushToast(statusMessage);
+    }
+
+    const requiredPlayers = roomInfo.player_limit ?? MIN_PLAYERS;
+    const droppedBelowRequired = Boolean(
+      prev &&
+        (prev.state === "started" || prev.state === "paused") &&
+        roomInfo.state === "waiting" &&
+        roomInfo.player_count < requiredPlayers
+    );
+    if (droppedBelowRequired) {
+      pushToast("Недостаточно игроков. Ожидаем подключение…");
+    }
+
+    prevRoomInfoRef.current = roomInfo;
+  }, [roomInfo, pushToast]);
+
   const activeTurn = useMemo(() => {
     if (
       screen === "offlineTurn" &&
@@ -465,6 +507,8 @@ export default function App() {
     setRoomCodeInput("");
     setStatus(null);
     setTurnRemainingMs(null);
+    setToasts([]);
+    prevRoomInfoRef.current = null;
   };
 
   const resetAll = () => {
@@ -969,6 +1013,16 @@ export default function App() {
               <div className="logo">Clash Royale Шпион</div>
             </header>
 
+            {toasts.length > 0 && (
+              <div className="toast-stack" role="status" aria-live="polite">
+                {toasts.map((toast) => (
+                  <div key={toast.id} className="toast-item">
+                    {toast.text}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {error && <div className="error">{error}</div>}
             {status && <div className="hint status">{status}</div>}
 
@@ -1331,10 +1385,11 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <div className="hint">Ожидаем минимум {MIN_PLAYERS} игроков</div>
+                  <div className="hint">
+                    Ожидаем игроков: {roomInfo.player_count} / {roomInfo.player_limit ?? MIN_PLAYERS}
+                  </div>
                 )}
 
-                {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
                 {canUseRoomDevTools && (
                   <button
                     type="button"
@@ -1391,18 +1446,14 @@ export default function App() {
                       <button className="btn full" onClick={handleGetRole}>
                         Показать карту
                       </button>
-                      <button
-                        className="btn secondary full"
-                        onClick={handleStartRoomTurn}
-                        disabled={!roomInfo.you_are_owner}
-                      >
-                        Начать игру
-                      </button>
+                      {roomInfo.you_are_owner && (
+                        <button className="btn secondary full" onClick={handleStartRoomTurn}>
+                          Начать игру
+                        </button>
+                      )}
                     </div>
                     {!roomInfo.you_are_owner && (
-                      <button className="leave-link" onClick={handleLeaveRoom}>
-                        Выйти из комнаты
-                      </button>
+                      <div className="hint">Ждём начала игры от {roomInfo.host_name || roomInfo.owner_name}</div>
                     )}
                   </>
                 )}
@@ -1414,7 +1465,6 @@ export default function App() {
                     {roomInfo.state === "paused" && (
                       <div className="hint danger">Игра на паузе. Таймер остановлен.</div>
                     )}
-                    {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
 
                     <div className="actions stack">
                       <button className="btn full" onClick={handleGetRole}>
@@ -1466,7 +1516,6 @@ export default function App() {
                 {roomPhase === "fallback" && (
                   <>
                     <div className="room-phase-title">Игра запущена</div>
-                    {roomInfo.status_message && <div className="hint">{roomInfo.status_message}</div>}
                     <div className="actions stack">
                       <button className="btn full" onClick={handleGetRole}>
                         Показать карту
