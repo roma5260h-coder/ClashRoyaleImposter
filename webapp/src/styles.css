@@ -276,6 +276,15 @@ body {
   color: var(--accent);
 }
 
+.lobby-helper {
+  align-self: center;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--accent);
+  opacity: 0.88;
+}
+
 .role {
   font-size: 18px;
   font-weight: 600;
