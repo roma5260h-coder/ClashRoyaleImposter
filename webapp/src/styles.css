@@ -90,11 +90,12 @@ body {
   backdrop-filter: blur(16px);
   color: var(--danger);
   border-radius: 12px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  padding: 10px 16px;
+  padding: 10px 14px;
   min-height: 42px;
   min-width: 92px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

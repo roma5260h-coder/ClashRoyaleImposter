@@ -1038,7 +1038,7 @@ export default function App() {
           <>
             {showTopBackButton && (
               <button className="top-back-btn" onClick={handleTopBack}>
-                Назад
+                ← Clash Royale Шпион
               </button>
             )}
 
