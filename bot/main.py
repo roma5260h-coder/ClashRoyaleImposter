@@ -5,6 +5,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
+try:
+    from bot.subscribers import init_subscribers_db, upsert_subscriber
+except ModuleNotFoundError:
+    from subscribers import init_subscribers_db, upsert_subscriber
+
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -19,6 +24,9 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def start(message: Message) -> None:
+    if message.from_user:
+        upsert_subscriber(message.from_user)
+
     if not WEBAPP_URL:
         await message.answer(
             "❌ WEBAPP_URL не задан. Укажи URL мини‑приложения в .env"
@@ -38,6 +46,7 @@ async def start(message: Message) -> None:
 
 
 async def main() -> None:
+    init_subscribers_db()
     await dp.start_polling(bot)
 
 
