@@ -46,6 +46,38 @@ const RANDOM_SCENARIOS = [
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
 const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
 const TOAST_DURATION_MS = 4800;
+const HOME_BG_URL = "/assets/osnovBanner-v2.jpg";
+const GAME_BG_URL = "/assets/cardBan-v2.jpg";
+const SPY_IMAGE_URL = "/assets/spy1-v2.png";
+const ELIXIR_IMAGE_URL = "/assets/elik-v2.png";
+const FREQUENT_CARD_IMAGE_URLS = [
+  "Рыцарь",
+  "Лучницы",
+  "Всадник на кабане",
+  "Ведьма",
+  "П.Е.К.К.А.",
+  "Рыбак",
+].map((name) => `/api/cards/image?name=${encodeURIComponent(name)}`);
+const CRITICAL_ASSET_URLS = [HOME_BG_URL, GAME_BG_URL, SPY_IMAGE_URL, ELIXIR_IMAGE_URL];
+const imagePreloadCache = new Map<string, Promise<void>>();
+
+function preloadImage(url: string): Promise<void> {
+  const normalized = (url || "").trim();
+  if (!normalized) return Promise.resolve();
+
+  const cached = imagePreloadCache.get(normalized);
+  if (cached) return cached;
+
+  const promise = new Promise<void>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve();
+    image.onerror = () => resolve();
+    image.src = normalized;
+  });
+
+  imagePreloadCache.set(normalized, promise);
+  return promise;
+}
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
@@ -118,6 +150,9 @@ export default function App() {
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
+  const [assetsReady, setAssetsReady] = useState<boolean>(false);
+  const [displayedBackgroundUrl, setDisplayedBackgroundUrl] = useState<string>(HOME_BG_URL);
+  const [backgroundReady, setBackgroundReady] = useState<boolean>(false);
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
@@ -150,6 +185,35 @@ export default function App() {
     const baseName = player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram";
     return player.isBot ? `🤖 ${baseName}` : baseName;
   };
+
+  useEffect(() => {
+    let canceled = false;
+
+    Promise.all(CRITICAL_ASSET_URLS.map((url) => preloadImage(url))).then(() => {
+      if (!canceled) setAssetsReady(true);
+    });
+    void Promise.allSettled(FREQUENT_CARD_IMAGE_URLS.map((url) => preloadImage(url)));
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  const targetBackgroundUrl = screen === "format" ? HOME_BG_URL : GAME_BG_URL;
+
+  useEffect(() => {
+    let canceled = false;
+
+    preloadImage(targetBackgroundUrl).then(() => {
+      if (canceled) return;
+      setDisplayedBackgroundUrl(targetBackgroundUrl);
+      setBackgroundReady(true);
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [targetBackgroundUrl]);
 
   useEffect(() => {
     tg?.ready?.();
@@ -1007,7 +1071,15 @@ export default function App() {
   const isHome = screen === "format";
 
   return (
-    <div className={`app ${isHome ? "bg-home" : "bg-game"}`}>
+    <div className="app">
+      <div className="app-bg-placeholder" />
+      <div
+        key={displayedBackgroundUrl}
+        className={`app-bg-layer ${backgroundReady ? "is-ready" : ""} ${
+          assetsReady ? "assets-ready" : "assets-loading"
+        }`}
+        style={{ backgroundImage: `url("${displayedBackgroundUrl}")` }}
+      />
       <div className="screenOverlay" />
       <div className={`screenContent ${isHome ? "homeContent" : "gameContent"}`}>
         {isHome && (
@@ -1262,7 +1334,7 @@ export default function App() {
                 <div className="title">Твоя роль</div>
                 {offlineRole.role === "spy" && (
                   <div className="card-image spy-frame">
-                    <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
+                    <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
                   </div>
                 )}
                 {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
@@ -1275,7 +1347,7 @@ export default function App() {
                     />
                     {typeof offlineRole.elixir_cost === "number" && (
                       <div className="elixir-badge" aria-label={`Эликсир ${offlineRole.elixir_cost}`}>
-                        <img src="/assets/elik.png" alt="Эликсир" />
+                        <img src={ELIXIR_IMAGE_URL} alt="Эликсир" />
                         <span>{offlineRole.elixir_cost}</span>
                       </div>
                     )}
@@ -1565,7 +1637,7 @@ export default function App() {
                 <div className="title">Твоя роль</div>
                 {roomRole.role === "spy" && (
                   <div className="card-image spy-frame">
-                    <img className="spy-art" src="/assets/spy1.png" alt="Шпион" />
+                    <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
                   </div>
                 )}
                 {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
@@ -1578,7 +1650,7 @@ export default function App() {
                     />
                     {typeof roomRole.elixir_cost === "number" && (
                       <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
-                        <img src="/assets/elik.png" alt="Эликсир" />
+                        <img src={ELIXIR_IMAGE_URL} alt="Эликсир" />
                         <span>{roomRole.elixir_cost}</span>
                       </div>
                     )}

@@ -33,6 +33,8 @@ APP_TTL_MINUTES = 60
 MIN_PLAYERS = 3
 MAX_PLAYERS = 12
 IMAGE_CACHE_TTL_SECONDS = 60 * 60 * 24
+STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+CARD_IMAGE_CACHE_CONTROL = "public, max-age=604800, stale-while-revalidate=86400"
 MIN_TURN_TIME_SECONDS = 5
 MAX_TURN_TIME_SECONDS = 30
 DEFAULT_TURN_TIME_SECONDS = 8
@@ -1755,7 +1757,7 @@ def card_image(name: str) -> Response:
         return Response(
             content=cached["content"],
             media_type=cached["content_type"],
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers={"Cache-Control": CARD_IMAGE_CACHE_CONTROL},
         )
 
     try:
@@ -1767,7 +1769,7 @@ def card_image(name: str) -> Response:
     return Response(
         content=fetched["content"],
         media_type=fetched["content_type"],
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": CARD_IMAGE_CACHE_CONTROL},
     )
 
 
@@ -1856,5 +1858,16 @@ def log_random(event: str, players: List[PlayerId], spies: List[PlayerId]) -> No
 
 
 WEBAPP_DIST = Path(__file__).resolve().parent / "webapp_dist"
+
+
+class CachedStaticFiles(StaticFiles):
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        request_path = str(scope.get("path") or "")
+        if request_path.startswith("/assets/"):
+            response.headers["Cache-Control"] = STATIC_ASSET_CACHE_CONTROL
+        return response
+
+
 if WEBAPP_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(WEBAPP_DIST), html=True), name="webapp")
+    app.mount("/", CachedStaticFiles(directory=str(WEBAPP_DIST), html=True), name="webapp")

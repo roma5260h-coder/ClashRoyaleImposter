@@ -1,4 +1,5 @@
 Put the UI images here and name them:
-- osnovBanner.png (main screen background)
-- cardBan.png (game/lobby background)
-- spy1.png (spy role image)
+- osnovBanner-v2.jpg (main screen background)
+- cardBan-v2.jpg (game/lobby background)
+- spy1-v2.png (spy role image)
+- elik-v2.png (elixir icon)

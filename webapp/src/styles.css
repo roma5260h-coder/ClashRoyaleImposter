@@ -29,17 +29,53 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.app-bg-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 20% 12%, rgba(123, 223, 242, 0.18) 0%, rgba(123, 223, 242, 0) 45%),
+    radial-gradient(circle at 80% 20%, rgba(255, 209, 102, 0.14) 0%, rgba(255, 209, 102, 0) 42%),
+    linear-gradient(180deg, #09101d 0%, #0b0f1b 100%);
+}
+
+.app-bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  opacity: 0;
+  transform: scale(1.008);
+  transition: opacity 220ms ease;
 }
 
-.bg-home {
-  background-image: url("/assets/osnovBanner.png");
+.app-bg-layer.is-ready {
+  opacity: 1;
+  transform: scale(1);
+  animation: bg-layer-fade 220ms ease both;
 }
 
-.bg-game {
-  background-image: url("/assets/cardBan.png");
+.app-bg-layer.assets-loading {
+  filter: saturate(0.96) brightness(0.92);
+}
+
+.app-bg-layer.assets-ready {
+  filter: none;
+}
+
+@keyframes bg-layer-fade {
+  0% {
+    opacity: 0.86;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .screenOverlay {
@@ -47,12 +83,12 @@ body {
   inset: 0;
   background: linear-gradient(180deg, rgba(6, 10, 20, 0.7) 0%, rgba(6, 10, 20, 0.55) 45%, rgba(6, 10, 20, 0.8) 100%);
   pointer-events: none;
-  z-index: 0;
+  z-index: 1;
 }
 
 .screenContent {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   min-height: 100vh;
   width: 100%;
   display: flex;
