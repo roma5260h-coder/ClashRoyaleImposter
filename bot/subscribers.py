@@ -111,3 +111,28 @@ def subscribers_count(active_only: bool = False) -> int:
         else:
             row = conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()
     return int((row or [0])[0])
+
+
+def subscribers_recent_count(days: int = 30, active_only: bool = False) -> int:
+    if days <= 0:
+        return 0
+    since_ts = int(time.time()) - int(days) * 24 * 60 * 60
+    query = "SELECT COUNT(DISTINCT user_id) FROM subscribers WHERE updated_at >= ?"
+    params: List[object] = [since_ts]
+    if active_only:
+        query += " AND is_active=1"
+    with _connect() as conn:
+        row = conn.execute(query, tuple(params)).fetchone()
+    return int((row or [0])[0])
+
+
+def new_subscribers_count(days: int = 30) -> int:
+    if days <= 0:
+        return 0
+    since_ts = int(time.time()) - int(days) * 24 * 60 * 60
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM subscribers WHERE added_at >= ?",
+            (since_ts,),
+        ).fetchone()
+    return int((row or [0])[0])
