@@ -1036,14 +1036,13 @@ export default function App() {
 
         {!isHome && (
           <>
-            {showTopBackButton && (
-              <button className="top-back-btn" onClick={handleTopBack}>
-                ← Clash Royale Шпион
-              </button>
-            )}
-
             <header className="header">
               <div className="logo">Clash Royale Шпион</div>
+              {showTopBackButton && (
+                <button className="top-back-btn" onClick={handleTopBack}>
+                  Назад
+                </button>
+              )}
             </header>
 
             {toasts.length > 0 && (
