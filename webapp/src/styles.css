@@ -569,7 +569,7 @@ body {
   line-height: 1.35;
   box-shadow: 0 14px 24px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(10px);
-  animation: toast-in-out 2.8s ease forwards;
+  animation: toast-in-out 4.8s ease forwards;
 }
 
 @keyframes toast-in-out {

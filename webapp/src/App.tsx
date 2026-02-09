@@ -45,6 +45,7 @@ const RANDOM_SCENARIOS = [
 
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
 const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
+const TOAST_DURATION_MS = 4800;
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
@@ -142,7 +143,7 @@ export default function App() {
     setToasts((prev) => [...prev, { id, text: message }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
-    }, 2800);
+    }, TOAST_DURATION_MS);
   }, []);
 
   const renderPlayerName = (player: RoomPlayer) => {
