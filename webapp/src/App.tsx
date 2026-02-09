@@ -1378,15 +1378,11 @@ export default function App() {
                   {roomInfo.player_count} / {roomInfo.player_limit ?? MAX_PLAYERS}
                 </div>
 
-                {roomInfo.can_start ? (
+                {roomInfo.can_start && (
                   <div className="actions">
                     <button className="btn" onClick={handleStartRoom}>
                       Начать игру
                     </button>
-                  </div>
-                ) : (
-                  <div className="hint">
-                    Ожидаем игроков: {roomInfo.player_count} / {roomInfo.player_limit ?? MIN_PLAYERS}
                   </div>
                 )}
 
