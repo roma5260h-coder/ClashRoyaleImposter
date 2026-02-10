@@ -719,6 +719,24 @@ body {
   gap: 12px;
 }
 
+.role-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  background: rgba(3, 5, 10, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.role-modal-card {
+  width: min(420px, 100%);
+  margin: 0;
+  max-height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
 
 .hint {
   color: var(--muted);

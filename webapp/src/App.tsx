@@ -21,8 +21,7 @@ type Screen =
   | "offlineTurn"
   | "joinRoom"
   | "room"
-  | "roomGame"
-  | "roomRole";
+  | "roomGame";
 
 type OfflineTurnStatus = {
   timer_enabled: boolean;
@@ -125,6 +124,7 @@ export default function App() {
     image_url?: string;
     elixir_cost?: number | null;
   } | null>(null);
+  const [isRoomRoleOpen, setIsRoomRoleOpen] = useState<boolean>(false);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomCardImageLoaded, setRoomCardImageLoaded] = useState<boolean>(false);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
@@ -146,6 +146,7 @@ export default function App() {
 
   const [initData, setInitData] = useState<string>(() => tg?.initData ?? "");
   const apiBase = import.meta.env.VITE_API_BASE ?? "";
+  const screenRef = useRef<Screen>(screen);
 
   const resolveImageUrl = (url: string) => {
     if (/^https?:\/\//i.test(url)) return url;
@@ -220,31 +221,45 @@ export default function App() {
 
   const applyOnlineRoomNavigation = useCallback(
     (info: RoomInfo) => {
+      const currentScreen = screenRef.current;
+      const prevInfo = prevRoomInfoRef.current;
+      const wasStartedOrPaused = Boolean(prevInfo && (prevInfo.state === "started" || prevInfo.state === "paused"));
       const isStartedOrPaused = info.state === "started" || info.state === "paused";
-      const shouldForcePlayingScreen = isStartedOrPaused && (screen === "room" || screen === "roomRole");
+      const enteredStartedOrPaused = isStartedOrPaused && !wasStartedOrPaused;
+      const shouldForcePlayingScreen = enteredStartedOrPaused && (currentScreen === "room" || currentScreen === "roomGame");
 
       if (shouldForcePlayingScreen) {
-        setRoomRole(null);
+        setIsRoomRoleOpen(false);
         const toastKey = `${info.room_code}:${info.state}:${info.turn_started_at ?? 0}`;
         if (lastForcedRoomStartToastKeyRef.current !== toastKey) {
           lastForcedRoomStartToastKeyRef.current = toastKey;
           pushToast("Игра началась!");
         }
-        setScreen("roomGame");
+        if (currentScreen !== "roomGame") {
+          setScreen("roomGame");
+        }
         return;
       }
 
-      if (screen === "roomGame" && info.state === "waiting") {
+      if (currentScreen === "roomGame" && info.state === "waiting") {
+        setIsRoomRoleOpen(false);
         setScreen("room");
       }
     },
-    [pushToast, screen]
+    [pushToast]
   );
 
   const renderPlayerName = (player: RoomPlayer) => {
     const baseName = player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram";
     return player.isBot ? `🤖 ${baseName}` : baseName;
   };
+
+  useEffect(() => {
+    screenRef.current = screen;
+    if (screen !== "roomGame" && isRoomRoleOpen) {
+      setIsRoomRoleOpen(false);
+    }
+  }, [isRoomRoleOpen, screen]);
 
   useEffect(() => {
     let canceled = false;
@@ -350,7 +365,7 @@ export default function App() {
   }, [timerEnabled]);
 
   useEffect(() => {
-    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame")) return;
 
     let canceled = false;
     const poll = async () => {
@@ -382,7 +397,7 @@ export default function App() {
   }, [apiConfig, applyOnlineRoomNavigation, roomInfo?.room_code, screen]);
 
   useEffect(() => {
-    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame")) return;
 
     let canceled = false;
     const ping = async () => {
@@ -410,7 +425,7 @@ export default function App() {
   }, [apiConfig, applyOnlineRoomNavigation, roomInfo?.room_code, screen]);
 
   useEffect(() => {
-    if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
+    if (!roomInfo || (screen !== "room" && screen !== "roomGame")) return;
 
     leaveSentRef.current = false;
     const endpoint = apiBase ? `${apiBase.replace(/\/$/, "")}/api/room/leave` : "/api/room/leave";
@@ -657,6 +672,7 @@ export default function App() {
     setOfflineTurn(null);
     setRoomInfo(null);
     setRoomRole(null);
+    setIsRoomRoleOpen(false);
     setRoomStarter(null);
     setShowRoomDevTools(false);
     setRoomCodeTapCount(0);
@@ -1097,7 +1113,7 @@ export default function App() {
         image_url: res.image_url,
         elixir_cost: res.elixir_cost,
       });
-      setScreen("roomRole");
+      setIsRoomRoleOpen(true);
     } catch (err) {
       setError(toUserError(err, "Не удалось получить роль"));
     }
@@ -1792,48 +1808,50 @@ export default function App() {
               </div>
             )}
 
-            {screen === "roomRole" && roomRole && (
-              <div className="card center">
-                <div className="title">Твоя роль</div>
-                {roomRole.role === "spy" && (
-                  <div className="card-image spy-frame">
-                    <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
+            {screen === "roomGame" && isRoomRoleOpen && roomRole && (
+              <div className="role-modal-backdrop" onClick={() => setIsRoomRoleOpen(false)}>
+                <div className="card role-modal-card" onClick={(event) => event.stopPropagation()}>
+                  <div className="title">Твоя роль</div>
+                  {roomRole.role === "spy" && (
+                    <div className="card-image spy-frame">
+                      <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
+                    </div>
+                  )}
+                  {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
+                    <div className="card-image-wrapper">
+                      {!roomCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
+                      <img
+                        className={`card-image ${roomCardImageLoaded ? "is-loaded" : "is-loading"}`}
+                        src={resolveImageUrl(roomRole.image_url)}
+                        alt="Карта"
+                        loading="eager"
+                        decoding="async"
+                        onLoad={(event) => handleRoomCardImageLoad(event.currentTarget.currentSrc || event.currentTarget.src)}
+                        onError={(event) => {
+                          setRoomImageOk(false);
+                          setRoomCardImageLoaded(false);
+                          logImageDebug("card_render_error_room", {
+                            src: event.currentTarget.currentSrc || event.currentTarget.src,
+                          });
+                        }}
+                      />
+                      {typeof roomRole.elixir_cost === "number" && (
+                        <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
+                          <img src={ELIXIR_IMAGE_URL} alt="Эликсир" />
+                          <span>{roomRole.elixir_cost}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {roomRole.role === "card" && roomRole.image_url && !roomImageOk && (
+                    <div className="hint">Изображение недоступно</div>
+                  )}
+                  <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
+                  <div className="actions">
+                    <button className="btn" onClick={() => setIsRoomRoleOpen(false)}>
+                      Закрыть
+                    </button>
                   </div>
-                )}
-                {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
-                  <div className="card-image-wrapper">
-                    {!roomCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
-                    <img
-                      className={`card-image ${roomCardImageLoaded ? "is-loaded" : "is-loading"}`}
-                      src={resolveImageUrl(roomRole.image_url)}
-                      alt="Карта"
-                      loading="eager"
-                      decoding="async"
-                      onLoad={(event) => handleRoomCardImageLoad(event.currentTarget.currentSrc || event.currentTarget.src)}
-                      onError={(event) => {
-                        setRoomImageOk(false);
-                        setRoomCardImageLoaded(false);
-                        logImageDebug("card_render_error_room", {
-                          src: event.currentTarget.currentSrc || event.currentTarget.src,
-                        });
-                      }}
-                    />
-                    {typeof roomRole.elixir_cost === "number" && (
-                      <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>
-                        <img src={ELIXIR_IMAGE_URL} alt="Эликсир" />
-                        <span>{roomRole.elixir_cost}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {roomRole.role === "card" && roomRole.image_url && !roomImageOk && (
-                  <div className="hint">Изображение недоступно</div>
-                )}
-                <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
-                <div className="actions">
-                  <button className="btn" onClick={() => setScreen("roomGame")}>
-                    Назад
-                  </button>
                 </div>
               </div>
             )}
