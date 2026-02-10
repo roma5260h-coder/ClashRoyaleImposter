@@ -45,6 +45,7 @@ const RANDOM_SCENARIOS = [
 
 const DEFAULT_RANDOM_ALLOWED = RANDOM_SCENARIOS.map((scenario) => scenario.id);
 const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG === "1";
+const CARD_IMAGE_DEBUG_LOGS = ROOM_DEV_LOGS || import.meta.env.VITE_CARD_IMAGE_DEBUG === "1";
 const TOAST_DURATION_MS = 4800;
 const HOME_BG_URL = "/assets/osnovBanner-v2.jpg";
 const GAME_BG_URL = "/assets/cardBan-v2.jpg";
@@ -60,6 +61,9 @@ const FREQUENT_CARD_IMAGE_URLS = [
 ].map((name) => `/api/cards/image?name=${encodeURIComponent(name)}`);
 const CRITICAL_ASSET_URLS = [HOME_BG_URL, GAME_BG_URL, SPY_IMAGE_URL, ELIXIR_IMAGE_URL];
 const imagePreloadCache = new Map<string, Promise<void>>();
+const cardImageLoadedCache = new Set<string>();
+const cardImagePreloadInflight = new Map<string, Promise<boolean>>();
+const cardImagePreloadMs = new Map<string, number>();
 
 function preloadImage(url: string): Promise<void> {
   const normalized = (url || "").trim();
@@ -77,6 +81,57 @@ function preloadImage(url: string): Promise<void> {
 
   imagePreloadCache.set(normalized, promise);
   return promise;
+}
+
+function logCardImage(event: string, payload: Record<string, unknown>) {
+  if (!CARD_IMAGE_DEBUG_LOGS) return;
+  console.info(`[card_image] ${event}`, payload);
+}
+
+async function preloadCardImage(url: string): Promise<boolean> {
+  const normalized = (url || "").trim();
+  if (!normalized) return false;
+
+  if (cardImageLoadedCache.has(normalized)) {
+    logCardImage("preload_cache_hit", { src: normalized });
+    return true;
+  }
+
+  const inflight = cardImagePreloadInflight.get(normalized);
+  if (inflight) {
+    const ok = await inflight;
+    logCardImage("preload_wait_inflight", { src: normalized, ok });
+    return ok;
+  }
+
+  const start = performance.now();
+  const task = new Promise<boolean>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const durationMs = performance.now() - start;
+      cardImageLoadedCache.add(normalized);
+      cardImagePreloadMs.set(normalized, durationMs);
+      logCardImage("preload_loaded", {
+        src: normalized,
+        duration_ms: Number(durationMs.toFixed(1)),
+      });
+      resolve(true);
+    };
+    image.onerror = () => {
+      const durationMs = performance.now() - start;
+      logCardImage("preload_failed", {
+        src: normalized,
+        duration_ms: Number(durationMs.toFixed(1)),
+      });
+      resolve(false);
+    };
+    image.src = normalized;
+  });
+
+  cardImagePreloadInflight.set(normalized, task);
+  const ok = await task;
+  cardImagePreloadInflight.delete(normalized);
+  return ok;
 }
 
 function toUserError(err: unknown, fallback: string): string {
@@ -128,6 +183,7 @@ export default function App() {
     elixir_cost?: number | null;
   } | null>(null);
   const [offlineImageOk, setOfflineImageOk] = useState<boolean>(true);
+  const [offlineCardImageLoaded, setOfflineCardImageLoaded] = useState<boolean>(false);
   const [starterPlayer, setStarterPlayer] = useState<number | null>(null);
   const [offlineTurn, setOfflineTurn] = useState<OfflineTurnStatus | null>(null);
 
@@ -140,6 +196,7 @@ export default function App() {
     elixir_cost?: number | null;
   } | null>(null);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
+  const [roomCardImageLoaded, setRoomCardImageLoaded] = useState<boolean>(false);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
   const [showRoomDevTools, setShowRoomDevTools] = useState<boolean>(false);
   const [roomCodeTapCount, setRoomCodeTapCount] = useState<number>(0);
@@ -147,6 +204,8 @@ export default function App() {
   const leaveSentRef = useRef<boolean>(false);
   const toastSeqRef = useRef<number>(0);
   const prevRoomInfoRef = useRef<RoomInfo | null>(null);
+  const offlineRoleImageRenderStartedAtRef = useRef<number | null>(null);
+  const roomRoleImageRenderStartedAtRef = useRef<number | null>(null);
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
@@ -163,6 +222,39 @@ export default function App() {
     const trimmed = apiBase.replace(/\/$/, "");
     return `${trimmed}${url.startsWith("/") ? "" : "/"}${url}`;
   };
+
+  const preloadRoleCardImage = useCallback(
+    async (rawUrl?: string, source?: string) => {
+      if (!rawUrl) return { ok: false, src: "" };
+      const resolvedSrc = resolveImageUrl(rawUrl);
+      logCardImage("role_card_src", { source: source ?? "unknown", src: resolvedSrc });
+      const ok = await preloadCardImage(resolvedSrc);
+      return { ok, src: resolvedSrc };
+    },
+    [apiBase]
+  );
+
+  const handleOfflineCardImageLoad = useCallback((src: string) => {
+    setOfflineCardImageLoaded(true);
+    const startedAt = offlineRoleImageRenderStartedAtRef.current;
+    const renderDuration = startedAt ? performance.now() - startedAt : null;
+    logCardImage("render_loaded_offline", {
+      src,
+      render_duration_ms: renderDuration !== null ? Number(renderDuration.toFixed(1)) : null,
+      preload_duration_ms: cardImagePreloadMs.has(src) ? Number((cardImagePreloadMs.get(src) ?? 0).toFixed(1)) : null,
+    });
+  }, []);
+
+  const handleRoomCardImageLoad = useCallback((src: string) => {
+    setRoomCardImageLoaded(true);
+    const startedAt = roomRoleImageRenderStartedAtRef.current;
+    const renderDuration = startedAt ? performance.now() - startedAt : null;
+    logCardImage("render_loaded_room", {
+      src,
+      render_duration_ms: renderDuration !== null ? Number(renderDuration.toFixed(1)) : null,
+      preload_duration_ms: cardImagePreloadMs.has(src) ? Number((cardImagePreloadMs.get(src) ?? 0).toFixed(1)) : null,
+    });
+  }, []);
 
   const apiConfig: ApiConfig = useMemo(() => ({ baseUrl: apiBase, initData }), [apiBase, initData]);
   const canUseRoomDevTools = Boolean(
@@ -192,12 +284,14 @@ export default function App() {
     Promise.all(CRITICAL_ASSET_URLS.map((url) => preloadImage(url))).then(() => {
       if (!canceled) setAssetsReady(true);
     });
-    void Promise.allSettled(FREQUENT_CARD_IMAGE_URLS.map((url) => preloadImage(url)));
+    void Promise.allSettled(
+      FREQUENT_CARD_IMAGE_URLS.map((url) => preloadCardImage(resolveImageUrl(url)))
+    );
 
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [apiBase]);
 
   const targetBackgroundUrl = screen === "format" ? HOME_BG_URL : GAME_BG_URL;
 
@@ -429,10 +523,14 @@ export default function App() {
 
   useEffect(() => {
     setOfflineImageOk(true);
+    setOfflineCardImageLoaded(false);
+    offlineRoleImageRenderStartedAtRef.current = null;
   }, [offlineRole?.image_url, offlineRole?.role]);
 
   useEffect(() => {
     setRoomImageOk(true);
+    setRoomCardImageLoaded(false);
+    roomRoleImageRenderStartedAtRef.current = null;
   }, [roomRole?.image_url, roomRole?.role]);
 
   useEffect(() => {
@@ -659,6 +757,11 @@ export default function App() {
 
     try {
       const res = await api.offlineReveal(apiConfig, offlineSessionId);
+      if (res.role === "card" && res.image_url) {
+        await preloadRoleCardImage(res.image_url, "offline_reveal");
+      }
+      offlineRoleImageRenderStartedAtRef.current = performance.now();
+      setOfflineCardImageLoaded(false);
       setOfflineRole({
         role: res.role,
         card: res.card,
@@ -972,6 +1075,11 @@ export default function App() {
 
     try {
       const res = await api.roomRole(apiConfig, roomInfo.room_code);
+      if (res.role === "card" && res.image_url) {
+        await preloadRoleCardImage(res.image_url, "room_role");
+      }
+      roomRoleImageRenderStartedAtRef.current = performance.now();
+      setRoomCardImageLoaded(false);
       setRoomRole({
         role: res.role,
         card: res.card,
@@ -1339,11 +1447,21 @@ export default function App() {
                 )}
                 {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
                   <div className="card-image-wrapper">
+                    {!offlineCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
                     <img
-                      className="card-image"
+                      className={`card-image ${offlineCardImageLoaded ? "is-loaded" : "is-loading"}`}
                       src={resolveImageUrl(offlineRole.image_url)}
                       alt="Карта"
-                      onError={() => setOfflineImageOk(false)}
+                      loading="eager"
+                      decoding="async"
+                      onLoad={(event) => handleOfflineCardImageLoad(event.currentTarget.currentSrc || event.currentTarget.src)}
+                      onError={(event) => {
+                        setOfflineImageOk(false);
+                        setOfflineCardImageLoaded(false);
+                        logCardImage("render_error_offline", {
+                          src: event.currentTarget.currentSrc || event.currentTarget.src,
+                        });
+                      }}
                     />
                     {typeof offlineRole.elixir_cost === "number" && (
                       <div className="elixir-badge" aria-label={`Эликсир ${offlineRole.elixir_cost}`}>
@@ -1642,11 +1760,21 @@ export default function App() {
                 )}
                 {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
                   <div className="card-image-wrapper">
+                    {!roomCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
                     <img
-                      className="card-image"
+                      className={`card-image ${roomCardImageLoaded ? "is-loaded" : "is-loading"}`}
                       src={resolveImageUrl(roomRole.image_url)}
                       alt="Карта"
-                      onError={() => setRoomImageOk(false)}
+                      loading="eager"
+                      decoding="async"
+                      onLoad={(event) => handleRoomCardImageLoad(event.currentTarget.currentSrc || event.currentTarget.src)}
+                      onError={(event) => {
+                        setRoomImageOk(false);
+                        setRoomCardImageLoaded(false);
+                        logCardImage("render_error_room", {
+                          src: event.currentTarget.currentSrc || event.currentTarget.src,
+                        });
+                      }}
                     />
                     {typeof roomRole.elixir_cost === "number" && (
                       <div className="elixir-badge" aria-label={`Эликсир ${roomRole.elixir_cost}`}>

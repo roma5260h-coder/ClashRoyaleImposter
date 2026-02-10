@@ -366,6 +366,29 @@ body {
 
 .card-image-wrapper {
   position: relative;
+  min-height: 220px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.card-image-placeholder {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.06) 8%, rgba(255, 255, 255, 0.14) 28%, rgba(255, 255, 255, 0.05) 48%),
+    rgba(255, 255, 255, 0.08);
+  background-size: 220% 100%;
+  animation: cardPlaceholderShimmer 1s ease-in-out infinite;
+}
+
+@keyframes cardPlaceholderShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 .card-image {
@@ -375,6 +398,18 @@ body {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.08);
   padding: 8px;
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.card-image.is-loading {
+  opacity: 0;
+}
+
+.card-image.is-loaded {
+  opacity: 1;
 }
 
 .card-image.spy-frame {

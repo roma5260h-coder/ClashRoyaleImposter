@@ -9,6 +9,7 @@ import sqlite3
 import time
 import unicodedata
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .game_logic import deal_roles
+from .data.cards import ALL_CARDS
 from .data.card_images import get_card_image
 from .data.elixir_costs import get_elixir_cost
 
@@ -35,7 +37,7 @@ MIN_PLAYERS = 3
 MAX_PLAYERS = 12
 IMAGE_CACHE_TTL_SECONDS = 60 * 60 * 24
 STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
-CARD_IMAGE_CACHE_CONTROL = "public, max-age=604800, stale-while-revalidate=86400"
+CARD_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 MIN_TURN_TIME_SECONDS = 5
 MAX_TURN_TIME_SECONDS = 30
 DEFAULT_TURN_TIME_SECONDS = 8
@@ -308,6 +310,29 @@ class RoomRoleResponse(BaseModel):
     card: Optional[str] = None
     image_url: Optional[str] = None
     elixir_cost: Optional[int] = None
+
+
+class CardsSampleTopItem(BaseModel):
+    card: str
+    count: int
+    share_percent: float
+
+
+class CardsSampleResponse(BaseModel):
+    requested_count: int
+    sampled_count: int
+    pool_size: int
+    unique_sampled: int
+    unique_pool: int
+    coverage_percent: float
+    missing_cards_count: int
+    missing_cards: List[str]
+    duplicates_in_pool: List[str]
+    cards_without_image_count: int
+    cards_without_image: List[str]
+    cards_without_elixir_count: int
+    cards_without_elixir: List[str]
+    top_10: List[CardsSampleTopItem]
 
 
 @dataclass
@@ -585,6 +610,62 @@ def debug_room_storage(event: str, raw_code: Optional[str], normalized_code: Opt
         normalized_code,
         len(rooms),
         room_storage_keys_preview(),
+    )
+
+
+def ensure_cards_debug_enabled() -> None:
+    if ROOM_DEBUG or DEV_TOOLS_ENABLED:
+        return
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+def sample_standard_card() -> str:
+    # Use the same role distribution pipeline as game sessions.
+    _, cards_for_players, _ = deal_roles([1, 2, 3], "standard", None)
+    for card in cards_for_players.values():
+        if card:
+            return card
+    raise RuntimeError("Failed to sample card from standard mode")
+
+
+def build_cards_sample_response(requested_count: int) -> CardsSampleResponse:
+    sample_size = max(1, min(10000, requested_count))
+    frequencies: Counter[str] = Counter()
+
+    for _ in range(sample_size):
+        frequencies[sample_standard_card()] += 1
+
+    pool_unique = sorted(set(ALL_CARDS))
+    sampled_unique = sorted(frequencies.keys())
+    missing_cards = sorted(set(pool_unique) - set(sampled_unique))
+    duplicates_in_pool = sorted([card for card, count in Counter(ALL_CARDS).items() if count > 1])
+    cards_without_image = sorted([card for card in pool_unique if not get_card_image(card)])
+    cards_without_elixir = sorted([card for card in pool_unique if get_elixir_cost(card) is None])
+
+    top_10 = [
+        CardsSampleTopItem(
+            card=card,
+            count=count,
+            share_percent=round((count / sample_size) * 100, 2),
+        )
+        for card, count in frequencies.most_common(10)
+    ]
+
+    return CardsSampleResponse(
+        requested_count=requested_count,
+        sampled_count=sample_size,
+        pool_size=len(ALL_CARDS),
+        unique_sampled=len(sampled_unique),
+        unique_pool=len(pool_unique),
+        coverage_percent=round((len(sampled_unique) / len(pool_unique)) * 100, 2) if pool_unique else 0.0,
+        missing_cards_count=len(missing_cards),
+        missing_cards=missing_cards,
+        duplicates_in_pool=duplicates_in_pool,
+        cards_without_image_count=len(cards_without_image),
+        cards_without_image=cards_without_image,
+        cards_without_elixir_count=len(cards_without_elixir),
+        cards_without_elixir=cards_without_elixir,
+        top_10=top_10,
     )
 
 
@@ -1014,6 +1095,24 @@ def build_offline_turn_status_response(session: OfflineSession) -> OfflineTurnSt
 @app.get("/api/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/debug/cards-sample", response_model=CardsSampleResponse)
+async def debug_cards_sample(count: int = 1000) -> CardsSampleResponse:
+    ensure_cards_debug_enabled()
+    started_at = time.perf_counter()
+    report = build_cards_sample_response(count)
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "[cards_debug] requested=%s sampled=%s unique=%s/%s coverage=%.2f%% duration_ms=%.1f",
+        count,
+        report.sampled_count,
+        report.unique_sampled,
+        report.unique_pool,
+        report.coverage_percent,
+        duration_ms,
+    )
+    return report
 
 
 @app.post("/api/auth", response_model=AuthResponse)
