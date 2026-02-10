@@ -134,6 +134,7 @@ export default function App() {
   const leaveSentRef = useRef<boolean>(false);
   const toastSeqRef = useRef<number>(0);
   const prevRoomInfoRef = useRef<RoomInfo | null>(null);
+  const lastForcedRoomStartToastKeyRef = useRef<string>("");
   const offlineRoleImageRenderStartedAtRef = useRef<number | null>(null);
   const roomRoleImageRenderStartedAtRef = useRef<number | null>(null);
 
@@ -216,6 +217,29 @@ export default function App() {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, TOAST_DURATION_MS);
   }, []);
+
+  const applyOnlineRoomNavigation = useCallback(
+    (info: RoomInfo) => {
+      const isStartedOrPaused = info.state === "started" || info.state === "paused";
+      const shouldForcePlayingScreen = isStartedOrPaused && (screen === "room" || screen === "roomRole");
+
+      if (shouldForcePlayingScreen) {
+        setRoomRole(null);
+        const toastKey = `${info.room_code}:${info.state}:${info.turn_started_at ?? 0}`;
+        if (lastForcedRoomStartToastKeyRef.current !== toastKey) {
+          lastForcedRoomStartToastKeyRef.current = toastKey;
+          pushToast("Игра началась!");
+        }
+        setScreen("roomGame");
+        return;
+      }
+
+      if (screen === "roomGame" && info.state === "waiting") {
+        setScreen("room");
+      }
+    },
+    [pushToast, screen]
+  );
 
   const renderPlayerName = (player: RoomPlayer) => {
     const baseName = player.display_name?.trim() ? player.display_name : "Не удалось получить имя из Telegram";
@@ -338,12 +362,7 @@ export default function App() {
           const starter = info.starter_name ? `Игру начинает: ${info.starter_name}` : "Игра началась";
           setRoomStarter((prev) => prev ?? starter);
         }
-        if (screen === "room" && (info.state === "started" || info.state === "paused")) {
-          setScreen("roomGame");
-        }
-        if (screen === "roomGame" && info.state === "waiting") {
-          setScreen("room");
-        }
+        applyOnlineRoomNavigation(info);
       } catch (err) {
         if (canceled) return;
         const message = toUserError(err, "");
@@ -360,7 +379,7 @@ export default function App() {
       canceled = true;
       clearInterval(interval);
     };
-  }, [apiConfig, roomInfo?.room_code, screen]);
+  }, [apiConfig, applyOnlineRoomNavigation, roomInfo?.room_code, screen]);
 
   useEffect(() => {
     if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
@@ -371,12 +390,7 @@ export default function App() {
         const info = await api.roomHeartbeat(apiConfig, roomInfo.room_code);
         if (canceled) return;
         setRoomInfo(info);
-        if (screen === "room" && (info.state === "started" || info.state === "paused")) {
-          setScreen("roomGame");
-        }
-        if (screen === "roomGame" && info.state === "waiting") {
-          setScreen("room");
-        }
+        applyOnlineRoomNavigation(info);
       } catch (err) {
         if (canceled) return;
         const message = toUserError(err, "");
@@ -393,7 +407,7 @@ export default function App() {
       canceled = true;
       clearInterval(interval);
     };
-  }, [apiConfig, roomInfo?.room_code, screen]);
+  }, [apiConfig, applyOnlineRoomNavigation, roomInfo?.room_code, screen]);
 
   useEffect(() => {
     if (!roomInfo || (screen !== "room" && screen !== "roomGame" && screen !== "roomRole")) return;
@@ -528,6 +542,7 @@ export default function App() {
   useEffect(() => {
     if (!roomInfo) {
       prevRoomInfoRef.current = null;
+      lastForcedRoomStartToastKeyRef.current = "";
       return;
     }
 
