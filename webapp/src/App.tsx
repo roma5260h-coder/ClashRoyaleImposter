@@ -659,6 +659,9 @@ export default function App() {
     return "fallback";
   }, [roomInfo]);
   const roomCurrentTurnName = roomInfo?.current_turn_name ?? `Игрок ${(roomInfo?.current_turn_index ?? 0) + 1}`;
+  const roomPlayingTitle = roomInfo?.timer_enabled
+    ? `Сейчас ход: ${roomCurrentTurnName}`
+    : `Начинает: ${starterDisplayName ?? roomCurrentTurnName}`;
 
   const clearSessionData = () => {
     leaveSentRef.current = false;
@@ -1737,7 +1740,7 @@ export default function App() {
 
                 {(roomPhase === "playing" || roomPhase === "paused") && (
                   <>
-                    <div className="room-phase-title">Сейчас ход: {roomCurrentTurnName}</div>
+                    <div className="room-phase-title">{roomPlayingTitle}</div>
                     {roomInfo.timer_enabled && renderTurnProgress()}
                     {roomInfo.state === "paused" && (
                       <div className="hint danger">Игра на паузе. Таймер остановлен.</div>
