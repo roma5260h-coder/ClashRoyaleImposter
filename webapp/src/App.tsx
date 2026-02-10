@@ -11,6 +11,7 @@ type Screen =
   | "randomInfo"
   | "onlineMenu"
   | "roomCreateSettings"
+  | "roomCreateRandomSettings"
   | "offlinePlayers"
   | "offlinePlayer"
   | "offlineRole"
@@ -848,6 +849,19 @@ export default function App() {
     }
   };
 
+  const handleProceedRandomRoomSettings = () => {
+    if (format !== "online" || gameMode !== "random") {
+      setError("Сначала выбери формат и режим");
+      return;
+    }
+    if (roomPlayerLimit === null || roomPlayerLimit < MIN_PLAYERS || roomPlayerLimit > MAX_PLAYERS) {
+      setError("Выберите корректный лимит игроков");
+      return;
+    }
+    setError(null);
+    setScreen("roomCreateRandomSettings");
+  };
+
   const createRoomNow = async () => {
     if (format !== "online" || !gameMode) {
       setError("Сначала выбери формат и режим");
@@ -1105,6 +1119,7 @@ export default function App() {
     screen === "randomInfo" ||
     screen === "onlineMenu" ||
     screen === "roomCreateSettings" ||
+    screen === "roomCreateRandomSettings" ||
     screen === "offlinePlayers" ||
     screen === "joinRoom";
 
@@ -1119,6 +1134,10 @@ export default function App() {
     }
     if (screen === "roomCreateSettings") {
       setScreen("onlineMenu");
+      return;
+    }
+    if (screen === "roomCreateRandomSettings") {
+      setScreen("roomCreateSettings");
       return;
     }
     if (screen === "joinRoom") {
@@ -1146,15 +1165,16 @@ export default function App() {
     );
   };
 
-  const renderTimerSetup = () => (
+  const renderTimerSetup = (options?: { title?: string; checkboxLabel?: string }) => (
     <div className="timer-options">
+      {options?.title && <div className="settings-label">{options.title}</div>}
       <label className="toggle-row">
         <input
           type="checkbox"
           checked={timerEnabled}
           onChange={(e) => setTimerEnabled(e.target.checked)}
         />
-        <span>Использовать таймер</span>
+        <span>{options?.checkboxLabel ?? "Использовать таймер"}</span>
       </label>
 
       {timerEnabled && (
@@ -1262,8 +1282,7 @@ export default function App() {
               <div className="card center">
                 <div className="title">Рандом режим</div>
                 <p className="text">
-                  Выберите режимы, которые хотите, чтобы могли выпасть. Бот случайно выберет один из
-                  отмеченных режимов.
+                  Отметьте режимы, которые могут выпасть. Один из них будет выбран случайно.
                 </p>
 
                 <div className="randomList">
@@ -1333,7 +1352,11 @@ export default function App() {
             {screen === "roomCreateSettings" && format === "online" && gameMode && (
               <div className="card center">
                 <div className="title">Настройки комнаты</div>
-                <p className="text">Выберите лимит игроков, затем дополнительные параметры.</p>
+                <p className="text">
+                  {gameMode === "random"
+                    ? "Шаг 1 из 2: выберите лимит игроков."
+                    : "Выберите лимит игроков, затем дополнительные параметры."}
+                </p>
 
                 <div className="settings-block">
                   <div className="settings-label">Лимит игроков в комнате</div>
@@ -1354,43 +1377,66 @@ export default function App() {
                   {roomPlayerLimit === null && <div className="hint">Сначала выберите лимит игроков</div>}
                 </div>
 
-                {gameMode === "random" && (
-                  <div className="settings-block">
-                    <div className="settings-label">Сценарии рандома</div>
-                    <div className="randomList">
-                      {RANDOM_SCENARIOS.map((scenario) => {
-                        const checked = randomAllowed.includes(scenario.id);
-                        return (
-                          <button
-                            key={scenario.id}
-                            type="button"
-                            className={`randomItem ${checked ? "checked" : ""}`}
-                            onClick={() => {
-                              setRandomAllowed((prev) => {
-                                if (prev.includes(scenario.id)) {
-                                  return prev.filter((item) => item !== scenario.id);
-                                }
-                                return [...prev, scenario.id];
-                              });
-                            }}
-                          >
-                            <span className={`checkbox ${checked ? "checked" : ""}`} />
-                            <span className="randomLabel">{scenario.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {randomAllowed.length < 2 && <div className="hint danger">Выберите минимум два режима</div>}
-                  </div>
-                )}
+                {gameMode !== "random" && renderTimerSetup()}
 
-                {renderTimerSetup()}
+                <div className="actions stack">
+                  {gameMode === "random" ? (
+                    <button
+                      className="btn full"
+                      onClick={handleProceedRandomRoomSettings}
+                      disabled={roomPlayerLimit === null}
+                    >
+                      Далее
+                    </button>
+                  ) : (
+                    <button className="btn full" onClick={createRoomNow} disabled={roomPlayerLimit === null}>
+                      Создать
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {screen === "roomCreateRandomSettings" && format === "online" && gameMode === "random" && (
+              <div className="card center">
+                <div className="title">Сценарии и таймер</div>
+                <p className="text">Шаг 2 из 2: выберите сценарии, затем при необходимости включите таймер.</p>
+
+                <div className="settings-block">
+                  <div className="settings-label">Сценарии рандома</div>
+                  <div className="randomList">
+                    {RANDOM_SCENARIOS.map((scenario) => {
+                      const checked = randomAllowed.includes(scenario.id);
+                      return (
+                        <button
+                          key={scenario.id}
+                          type="button"
+                          className={`randomItem ${checked ? "checked" : ""}`}
+                          onClick={() => {
+                            setRandomAllowed((prev) => {
+                              if (prev.includes(scenario.id)) {
+                                return prev.filter((item) => item !== scenario.id);
+                              }
+                              return [...prev, scenario.id];
+                            });
+                          }}
+                        >
+                          <span className={`checkbox ${checked ? "checked" : ""}`} />
+                          <span className="randomLabel">{scenario.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {randomAllowed.length < 2 && <div className="hint danger">Выберите минимум два режима</div>}
+                </div>
+
+                {renderTimerSetup({ title: "Таймер", checkboxLabel: "Включить таймер" })}
 
                 <div className="actions stack">
                   <button
                     className="btn full"
                     onClick={createRoomNow}
-                    disabled={roomPlayerLimit === null || (gameMode === "random" && randomAllowed.length < 2)}
+                    disabled={roomPlayerLimit === null || randomAllowed.length < 2}
                   >
                     Создать
                   </button>
