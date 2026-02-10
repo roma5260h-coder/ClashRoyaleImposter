@@ -1,1 +1,4 @@
 .env
+webapp/dist/
+webapp/tsconfig.tsbuildinfo
+broadcast.txt
