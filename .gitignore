@@ -1,6 +1,4 @@
 .env
-__pycache__/
-*.pyc
-.vscode/
-.idea/
-*.log
+webapp/dist/
+webapp/tsconfig.tsbuildinfo
+broadcast.txt
