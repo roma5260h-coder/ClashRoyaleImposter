@@ -652,12 +652,10 @@ export default function App() {
   const roomPhase = useMemo<"ready" | "playing" | "paused" | "finished" | "fallback">(() => {
     if (!roomInfo) return "fallback";
     if (roomInfo.state === "paused") return "paused";
-    if (roomInfo.timer_enabled) {
-      if (roomInfo.turn_state === "ready_to_start") return "ready";
-      if (roomInfo.turn_state === "turn_loop_active") return "playing";
-      if (roomInfo.turn_state === "finished") return "finished";
-    }
+    if (roomInfo.turn_state === "ready_to_start") return "ready";
+    if (roomInfo.turn_state === "turn_loop_active") return "playing";
     if (roomInfo.turn_state === "finished") return "finished";
+    if (roomInfo.state === "started") return "playing";
     return "fallback";
   }, [roomInfo]);
   const roomCurrentTurnName = roomInfo?.current_turn_name ?? `Игрок ${(roomInfo?.current_turn_index ?? 0) + 1}`;

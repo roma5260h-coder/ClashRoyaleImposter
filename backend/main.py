@@ -1637,8 +1637,9 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
         room.turn_state = TURN_STATE_READY_TO_START
         room.turns_completed = False
     else:
-        room.turn_state = TURN_STATE_FINISHED
-        room.turns_completed = True
+        # Без таймера игра должна перейти в активную фазу, а не завершаться сразу.
+        room.turn_state = TURN_STATE_ACTIVE
+        room.turns_completed = False
 
     starter_entry = room.players.get(starter_user_id)
     starter_name = str(starter_entry.get("display_name") or "") if starter_entry else ""
@@ -1721,8 +1722,9 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
         room.turn_state = TURN_STATE_READY_TO_START
         room.turns_completed = False
     else:
-        room.turn_state = TURN_STATE_FINISHED
-        room.turns_completed = True
+        # Без таймера повторный запуск тоже не должен отправлять игру в финал.
+        room.turn_state = TURN_STATE_ACTIVE
+        room.turns_completed = False
     starter_entry = room.players.get(room.starter_user_id)
     starter_name = str(starter_entry.get("display_name") or "") if starter_entry else ""
     room.last_status_message = None
@@ -1832,8 +1834,6 @@ async def room_turn_finish(request: RoomActionRequest) -> RoomInfo:
         raise HTTPException(status_code=400, detail="Game not started")
     if room.owner_user_id != user_id:
         raise HTTPException(status_code=403, detail="Only owner can finish")
-    if not room.timer_enabled:
-        raise HTTPException(status_code=400, detail="Timer disabled")
     if room.turn_state == TURN_STATE_WAITING:
         raise HTTPException(status_code=400, detail="Сначала запустите игру")
 
