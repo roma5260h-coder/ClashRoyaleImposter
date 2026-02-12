@@ -38,8 +38,10 @@ const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
 const GENERIC_ERROR_MESSAGE = "Произошла ошибка, попробуйте ещё раз";
 const RANDOM_SCENARIOS = [
+  { id: "standard", label: "Стандартный (обычный режим)" },
   { id: "all_spies", label: "Все шпионы" },
   { id: "same_card", label: "У всех одна карта" },
+  { id: "one_outlier_card", label: "У одного игрока другая карта" },
   { id: "different_cards", label: "У всех разные карты" },
   { id: "multi_spy", label: "Несколько шпионов" },
 ];

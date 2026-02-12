@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-from .game_logic import deal_roles
+from .game_logic import RandomScenario, deal_roles
 from .data.cards import ALL_CARDS
 from .data.card_images import get_card_image
 from .data.elixir_costs import get_elixir_cost
@@ -687,6 +687,38 @@ def normalize_timer_settings(timer_enabled: bool, turn_time_seconds: Optional[in
     return True, turn_time_seconds
 
 
+def normalize_random_allowed_modes(
+    game_mode: str,
+    random_allowed_modes: Optional[List[str]],
+) -> Optional[List[str]]:
+    if game_mode != "random":
+        return None
+    if random_allowed_modes is None:
+        return None
+
+    allowed_values = {scenario.value for scenario in RandomScenario}
+    unique_modes: List[str] = []
+    invalid_modes: List[str] = []
+
+    for raw_mode in random_allowed_modes:
+        mode = raw_mode.strip().lower()
+        if not mode:
+            continue
+        if mode not in allowed_values:
+            invalid_modes.append(raw_mode)
+            continue
+        if mode not in unique_modes:
+            unique_modes.append(mode)
+
+    if invalid_modes:
+        invalid = ", ".join(invalid_modes)
+        raise HTTPException(status_code=400, detail=f"Неизвестные random-режимы: {invalid}")
+    if len(unique_modes) < 2:
+        raise HTTPException(status_code=400, detail="Выберите минимум два режима")
+
+    return unique_modes
+
+
 def required_room_player_count(room: "RoomSession") -> int:
     configured_limit = room.player_limit if room.player_limit else MIN_PLAYERS
     return max(MIN_PLAYERS, min(MAX_PLAYERS, configured_limit))
@@ -1138,12 +1170,10 @@ async def offline_start(request: OfflineStartRequest) -> OfflineStartResponse:
         raise HTTPException(status_code=400, detail="Invalid game mode")
 
     session_id = uuid.uuid4().hex
-    random_allowed = request.random_allowed_modes
-    if request.game_mode == "random" and random_allowed is not None:
-        unique_allowed = list(dict.fromkeys(random_allowed))
-        if len(unique_allowed) < 2:
-            raise HTTPException(status_code=400, detail="Выберите минимум два режима")
-        random_allowed = unique_allowed
+    random_allowed = normalize_random_allowed_modes(
+        request.game_mode,
+        request.random_allowed_modes,
+    )
 
     timer_enabled, turn_time_seconds = normalize_timer_settings(
         request.timer_enabled, request.turn_time_seconds
@@ -1388,12 +1418,10 @@ async def room_create(request: RoomCreateRequest) -> RoomInfo:
     if request.player_limit < MIN_PLAYERS or request.player_limit > MAX_PLAYERS:
         raise HTTPException(status_code=400, detail="Неверный лимит игроков")
 
-    random_allowed = request.random_allowed_modes
-    if request.game_mode == "random" and random_allowed is not None:
-        unique_allowed = list(dict.fromkeys(random_allowed))
-        if len(unique_allowed) < 2:
-            raise HTTPException(status_code=400, detail="Выберите минимум два режима")
-        random_allowed = unique_allowed
+    random_allowed = normalize_random_allowed_modes(
+        request.game_mode,
+        request.random_allowed_modes,
+    )
 
     timer_enabled, turn_time_seconds = normalize_timer_settings(
         request.timer_enabled, request.turn_time_seconds
