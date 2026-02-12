@@ -13,8 +13,10 @@ class PlayMode(str, Enum):
 
 
 class RandomScenario(str, Enum):
+    STANDARD = "standard"
     ALL_SPIES = "all_spies"
     SAME_CARD = "same_card"
+    ONE_OUTLIER_CARD = "one_outlier_card"
     DIFFERENT_CARDS = "different_cards"
     MULTIPLE_SPIES = "multiple_spies"
 
@@ -31,10 +33,21 @@ def _multiple_spies_count(player_count: int) -> int:
     return 3
 
 
+def _random_distinct_card(excluded_card: str) -> str:
+    if len(ALL_CARDS) < 2:
+        raise ValueError("Need at least 2 cards for outlier scenario")
+    candidate = excluded_card
+    while candidate == excluded_card:
+        candidate = random.choice(ALL_CARDS)
+    return candidate
+
+
 def _resolve_random_scenario(player_count: int) -> RandomScenario:
     scenarios = [
+        RandomScenario.STANDARD,
         RandomScenario.ALL_SPIES,
         RandomScenario.SAME_CARD,
+        RandomScenario.ONE_OUTLIER_CARD,
         RandomScenario.DIFFERENT_CARDS,
     ]
     if player_count > 3:
@@ -60,6 +73,14 @@ def deal_roles(
 
     scenario = _resolve_random_scenario(len(player_list))
 
+    if scenario == RandomScenario.STANDARD:
+        spy = random.choice(player_list)
+        card = random.choice(ALL_CARDS)
+        cards_for_players = {
+            p: (None if p == spy else card) for p in player_list
+        }
+        return [spy], cards_for_players, scenario.value
+
     if scenario == RandomScenario.ALL_SPIES:
         cards_for_players = {p: None for p in player_list}
         return list(player_list), cards_for_players, scenario.value
@@ -67,6 +88,15 @@ def deal_roles(
     if scenario == RandomScenario.SAME_CARD:
         card = random.choice(ALL_CARDS)
         cards_for_players = {p: card for p in player_list}
+        return [], cards_for_players, scenario.value
+
+    if scenario == RandomScenario.ONE_OUTLIER_CARD:
+        base_card = random.choice(ALL_CARDS)
+        outlier_card = _random_distinct_card(base_card)
+        outlier_player = random.choice(player_list)
+        cards_for_players = {
+            p: (outlier_card if p == outlier_player else base_card) for p in player_list
+        }
         return [], cards_for_players, scenario.value
 
     if scenario == RandomScenario.DIFFERENT_CARDS:
