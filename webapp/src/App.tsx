@@ -91,10 +91,6 @@ function isRoomGoneError(message: string): boolean {
 }
 
 export default function App() {
-  const previewCardName = useMemo(() => {
-    const raw = new URLSearchParams(window.location.search).get("preview_card");
-    return (raw ?? "").trim();
-  }, []);
   const [screen, setScreen] = useState<Screen>("loading");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -208,22 +204,26 @@ export default function App() {
     });
   }, [logImageDebug]);
 
-  const openPreviewCard = useCallback(
-    async (cardName: string): Promise<boolean> => {
+  const fetchCardMeta = useCallback(
+    async (cardName: string) => {
       const normalized = cardName.trim();
-      if (!normalized) return false;
+      if (!normalized) {
+        throw new Error("Не указано название карты");
+      }
 
       const base = apiBase.replace(/\/$/, "");
       const endpoint = `${base}/api/cards/meta?name=${encodeURIComponent(normalized)}`;
       const res = await fetch(endpoint);
       if (!res.ok) {
-        let message = "Не удалось открыть предпросмотр карты";
+        let message = "Не удалось получить данные карты";
         const text = await res.text();
         if (text && res.status < 500) {
           try {
             const data = JSON.parse(text);
             if (data?.detail) {
               message = data.detail;
+            } else {
+              message = text;
             }
           } catch {
             message = text;
@@ -232,35 +232,21 @@ export default function App() {
         throw new Error(message);
       }
 
-      const data = (await res.json()) as {
+      return (await res.json()) as {
         name: string;
         image_url?: string | null;
         elixir_cost?: number | null;
       };
-
-      let cardPreloadOk = true;
-      if (data.image_url) {
-        const preloadResult = await preloadRoleCardImage(data.image_url, "preview_card");
-        cardPreloadOk = Boolean(preloadResult?.ok);
-      }
-
-      setCurrentPlayer(1);
-      setOfflineImageOk(cardPreloadOk);
-      offlineRoleImageRenderStartedAtRef.current = performance.now();
-      setOfflineCardImageLoaded(data.image_url ? cardPreloadOk : true);
-      setOfflineRole({
-        role: "card",
-        card: data.name,
-        image_url: data.image_url ?? undefined,
-        elixir_cost: data.elixir_cost ?? null,
-      });
-      setScreen("offlineRole");
-      return true;
     },
-    [apiBase, preloadRoleCardImage]
+    [apiBase]
   );
 
   const apiConfig: ApiConfig = useMemo(() => ({ baseUrl: apiBase, initData }), [apiBase, initData]);
+  const canUseRoomPreviewTools = Boolean(
+    roomInfo &&
+      screen === "room" &&
+      roomInfo.you_are_owner
+  );
   const canUseRoomDevTools = Boolean(
     roomInfo &&
       screen === "room" &&
@@ -314,7 +300,7 @@ export default function App() {
 
   useEffect(() => {
     screenRef.current = screen;
-    if (screen !== "roomGame" && isRoomRoleOpen) {
+    if (screen !== "roomGame" && screen !== "room" && isRoomRoleOpen) {
       setIsRoomRoleOpen(false);
     }
   }, [isRoomRoleOpen, screen]);
@@ -403,22 +389,12 @@ export default function App() {
     if (!initData) return;
     api
       .auth(apiConfig)
-      .then(async () => {
-        if (previewCardName) {
-          try {
-            const opened = await openPreviewCard(previewCardName);
-            if (opened) return;
-          } catch (err) {
-            setError(toUserError(err, "Не удалось открыть предпросмотр карты"));
-          }
-        }
-        setScreen("format");
-      })
+      .then(() => setScreen("format"))
       .catch((err) => {
         setError(toUserError(err, "Не удалось подтвердить Telegram"));
         setScreen("format");
       });
-  }, [apiConfig, initData, openPreviewCard, previewCardName]);
+  }, [apiConfig, initData]);
 
   useEffect(() => {
     if (screen === "randomInfo") {
@@ -856,11 +832,6 @@ export default function App() {
   };
 
   const handleCloseRole = async () => {
-    if (previewCardName && !offlineSessionId) {
-      setOfflineRole(null);
-      setScreen("format");
-      return;
-    }
     if (!offlineSessionId) return;
     setError(null);
 
@@ -1094,7 +1065,7 @@ export default function App() {
   };
 
   const handleLobbyCodeTap = () => {
-    if (!canUseRoomDevTools) return;
+    if (!canUseRoomPreviewTools) return;
     setRoomCodeTapCount((prev) => {
       const next = prev + 1;
       if (next >= 5) {
@@ -1132,6 +1103,35 @@ export default function App() {
   const handleRoomClearBots = async () => {
     if (!roomInfo) return;
     await runRoomDevAction(() => api.roomBotsClear(apiConfig, roomInfo.room_code));
+  };
+
+  const handleDevPreviewCard = async (cardName: string) => {
+    if (!canUseRoomPreviewTools) return;
+    setError(null);
+    setDevActionLoading(true);
+    try {
+      const cardMeta = await fetchCardMeta(cardName);
+      let cardPreloadOk = true;
+      if (cardMeta.image_url) {
+        const preloadResult = await preloadRoleCardImage(cardMeta.image_url, "dev_card_preview");
+        cardPreloadOk = Boolean(preloadResult?.ok);
+      }
+      roomRoleImageRenderStartedAtRef.current = performance.now();
+      setRoomImageOk(cardPreloadOk);
+      setRoomCardImageLoaded(cardMeta.image_url ? cardPreloadOk : true);
+      setRoomRole({
+        role: "card",
+        card: cardMeta.name,
+        image_url: cardMeta.image_url ?? undefined,
+        elixir_cost: cardMeta.elixir_cost ?? null,
+      });
+      setIsRoomRoleOpen(true);
+      setShowRoomDevTools(false);
+    } catch (err) {
+      setError(toUserError(err, "Не удалось показать карту"));
+    } finally {
+      setDevActionLoading(false);
+    }
   };
 
   const handleRestartRoom = async () => {
@@ -1759,23 +1759,45 @@ export default function App() {
               </div>
             )}
 
-            {showRoomDevTools && canUseRoomDevTools && roomInfo && (
+            {showRoomDevTools && canUseRoomPreviewTools && roomInfo && (
               <div className="dev-modal-backdrop" onClick={() => !devActionLoading && setShowRoomDevTools(false)}>
                 <div className="dev-modal" onClick={(e) => e.stopPropagation()}>
                   <div className="title">DEV инструменты</div>
-                  <p className="text">Только для тестирования онлайн-лобби в одиночку.</p>
+                  <p className="text">Скрытые инструменты для тестирования в лобби.</p>
                   <div className="actions stack">
-                    <button className="btn full" onClick={() => handleRoomAddBots(1)} disabled={devActionLoading}>
-                      Добавить бота +1
+                    {canUseRoomDevTools && (
+                      <button className="btn full" onClick={() => handleRoomAddBots(1)} disabled={devActionLoading}>
+                        Добавить бота +1
+                      </button>
+                    )}
+                    {canUseRoomDevTools && (
+                      <button className="btn full" onClick={() => handleRoomAddBots(3)} disabled={devActionLoading}>
+                        Добавить 3 бота
+                      </button>
+                    )}
+                    {canUseRoomDevTools && (
+                      <button className="btn full" onClick={handleRoomFillBots} disabled={devActionLoading}>
+                        Заполнить до лимита
+                      </button>
+                    )}
+                    {canUseRoomDevTools && (
+                      <button className="btn secondary full" onClick={handleRoomClearBots} disabled={devActionLoading}>
+                        Удалить всех ботов
+                      </button>
+                    )}
+                    <button
+                      className="btn secondary full"
+                      onClick={() => handleDevPreviewCard("Королевский гигант")}
+                      disabled={devActionLoading}
+                    >
+                      Карта: Королевский гигант
                     </button>
-                    <button className="btn full" onClick={() => handleRoomAddBots(3)} disabled={devActionLoading}>
-                      Добавить 3 бота
-                    </button>
-                    <button className="btn full" onClick={handleRoomFillBots} disabled={devActionLoading}>
-                      Заполнить до лимита
-                    </button>
-                    <button className="btn secondary full" onClick={handleRoomClearBots} disabled={devActionLoading}>
-                      Удалить всех ботов
+                    <button
+                      className="btn secondary full"
+                      onClick={() => handleDevPreviewCard("Электрогигант")}
+                      disabled={devActionLoading}
+                    >
+                      Карта: Электрогигант
                     </button>
                     <button
                       className="link"
@@ -1882,7 +1904,7 @@ export default function App() {
               </div>
             )}
 
-            {screen === "roomGame" && isRoomRoleOpen && roomRole && (
+            {(screen === "roomGame" || screen === "room") && isRoomRoleOpen && roomRole && (
               <div className="role-modal-backdrop" onClick={() => setIsRoomRoleOpen(false)}>
                 <div className="card role-modal-card" onClick={(event) => event.stopPropagation()}>
                   <div className="title">Твоя роль</div>
