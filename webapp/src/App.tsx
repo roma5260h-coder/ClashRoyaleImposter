@@ -91,6 +91,10 @@ function isRoomGoneError(message: string): boolean {
 }
 
 export default function App() {
+  const previewCardName = useMemo(() => {
+    const raw = new URLSearchParams(window.location.search).get("preview_card");
+    return (raw ?? "").trim();
+  }, []);
   const [screen, setScreen] = useState<Screen>("loading");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -203,6 +207,58 @@ export default function App() {
         imagePreloader.getDuration(src) !== null ? Number((imagePreloader.getDuration(src) ?? 0).toFixed(1)) : null,
     });
   }, [logImageDebug]);
+
+  const openPreviewCard = useCallback(
+    async (cardName: string): Promise<boolean> => {
+      const normalized = cardName.trim();
+      if (!normalized) return false;
+
+      const base = apiBase.replace(/\/$/, "");
+      const endpoint = `${base}/api/cards/meta?name=${encodeURIComponent(normalized)}`;
+      const res = await fetch(endpoint);
+      if (!res.ok) {
+        let message = "Не удалось открыть предпросмотр карты";
+        const text = await res.text();
+        if (text && res.status < 500) {
+          try {
+            const data = JSON.parse(text);
+            if (data?.detail) {
+              message = data.detail;
+            }
+          } catch {
+            message = text;
+          }
+        }
+        throw new Error(message);
+      }
+
+      const data = (await res.json()) as {
+        name: string;
+        image_url?: string | null;
+        elixir_cost?: number | null;
+      };
+
+      let cardPreloadOk = true;
+      if (data.image_url) {
+        const preloadResult = await preloadRoleCardImage(data.image_url, "preview_card");
+        cardPreloadOk = Boolean(preloadResult?.ok);
+      }
+
+      setCurrentPlayer(1);
+      setOfflineImageOk(cardPreloadOk);
+      offlineRoleImageRenderStartedAtRef.current = performance.now();
+      setOfflineCardImageLoaded(data.image_url ? cardPreloadOk : true);
+      setOfflineRole({
+        role: "card",
+        card: data.name,
+        image_url: data.image_url ?? undefined,
+        elixir_cost: data.elixir_cost ?? null,
+      });
+      setScreen("offlineRole");
+      return true;
+    },
+    [apiBase, preloadRoleCardImage]
+  );
 
   const apiConfig: ApiConfig = useMemo(() => ({ baseUrl: apiBase, initData }), [apiBase, initData]);
   const canUseRoomDevTools = Boolean(
@@ -347,12 +403,22 @@ export default function App() {
     if (!initData) return;
     api
       .auth(apiConfig)
-      .then(() => setScreen("format"))
+      .then(async () => {
+        if (previewCardName) {
+          try {
+            const opened = await openPreviewCard(previewCardName);
+            if (opened) return;
+          } catch (err) {
+            setError(toUserError(err, "Не удалось открыть предпросмотр карты"));
+          }
+        }
+        setScreen("format");
+      })
       .catch((err) => {
         setError(toUserError(err, "Не удалось подтвердить Telegram"));
         setScreen("format");
       });
-  }, [apiConfig, initData]);
+  }, [apiConfig, initData, openPreviewCard, previewCardName]);
 
   useEffect(() => {
     if (screen === "randomInfo") {
@@ -790,6 +856,11 @@ export default function App() {
   };
 
   const handleCloseRole = async () => {
+    if (previewCardName && !offlineSessionId) {
+      setOfflineRole(null);
+      setScreen("format");
+      return;
+    }
     if (!offlineSessionId) return;
     setError(null);
 

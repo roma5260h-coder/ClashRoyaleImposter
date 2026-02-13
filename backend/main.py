@@ -312,6 +312,12 @@ class RoomRoleResponse(BaseModel):
     elixir_cost: Optional[int] = None
 
 
+class CardMetaResponse(BaseModel):
+    name: str
+    image_url: Optional[str] = None
+    elixir_cost: Optional[int] = None
+
+
 class CardsSampleTopItem(BaseModel):
     card: str
     count: int
@@ -1987,6 +1993,21 @@ def card_image(name: str) -> Response:
         content=fetched["content"],
         media_type=fetched["content_type"],
         headers={"Cache-Control": CARD_IMAGE_CACHE_CONTROL},
+    )
+
+
+@app.get("/api/cards/meta", response_model=CardMetaResponse)
+def card_meta(name: str) -> CardMetaResponse:
+    normalized = (name or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Card name is required")
+    if normalized not in ALL_CARDS:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    return CardMetaResponse(
+        name=normalized,
+        image_url=build_image_proxy_url(normalized),
+        elixir_cost=get_elixir_cost(normalized),
     )
 
 
