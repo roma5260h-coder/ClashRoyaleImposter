@@ -500,12 +500,12 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  max-height: none;
-  min-height: clamp(300px, 46vh, 430px);
-  height: clamp(300px, 46vh, 430px);
+  min-height: 220px;
+  max-height: 220px;
+  height: 220px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
-  padding: 14px;
+  padding: 8px;
 }
 
 .card-image.spy-frame .spy-art {
