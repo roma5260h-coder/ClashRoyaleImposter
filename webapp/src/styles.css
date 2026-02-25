@@ -515,8 +515,8 @@ body {
   max-height: 100%;
   object-fit: contain;
   object-position: center;
-  transform: scale(1.22);
-  transform-origin: center bottom;
+  transform: translateY(4px) scale(1.28);
+  transform-origin: center center;
 }
 
 .elixir-badge {
