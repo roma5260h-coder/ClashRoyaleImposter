@@ -369,27 +369,6 @@ body {
   margin-right: auto;
 }
 
-.mode-preview {
-  width: 100%;
-  min-height: 160px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background:
-    radial-gradient(circle at 50% 22%, rgba(255, 209, 102, 0.28) 0%, rgba(255, 209, 102, 0) 70%),
-    rgba(10, 15, 29, 0.52);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.mode-preview-art {
-  width: clamp(170px, 52vw, 260px);
-  max-height: 180px;
-  object-fit: contain;
-  filter: brightness(1.1) drop-shadow(0 12px 20px rgba(0, 0, 0, 0.45));
-}
-
 .list {
   margin: 0;
   padding-left: 18px;
@@ -521,18 +500,21 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  min-height: 260px;
+  max-height: none;
+  min-height: clamp(300px, 46vh, 430px);
+  height: clamp(300px, 46vh, 430px);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
-  padding: 10px;
+  padding: 14px;
 }
 
 .card-image.spy-frame .spy-art {
-  width: 100%;
+  width: auto;
   height: 100%;
-  max-height: 300px;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
-  object-position: center bottom;
+  object-position: center;
 }
 
 .elixir-badge {
