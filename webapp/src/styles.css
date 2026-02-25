@@ -515,7 +515,7 @@ body {
   max-height: 100%;
   object-fit: contain;
   object-position: center;
-  transform: translateY(4px) scale(1.28);
+  transform: translateY(4px) scale(1.34);
   transform-origin: center center;
 }
 
