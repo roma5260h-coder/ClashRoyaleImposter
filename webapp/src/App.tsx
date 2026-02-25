@@ -34,6 +34,13 @@ type OfflineTurnStatus = {
   turns_completed: boolean;
 };
 
+type RolePayload = {
+  role: string;
+  card?: string;
+  image_url?: string;
+  elixir_cost?: number | null;
+};
+
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
 const GENERIC_ERROR_MESSAGE = "Произошла ошибка, попробуйте ещё раз";
@@ -52,9 +59,11 @@ const IMAGE_DEBUG_LOGS =
   ROOM_DEV_LOGS || import.meta.env.VITE_CARD_IMAGE_DEBUG === "1" || import.meta.env.VITE_IMAGE_DEBUG === "1";
 const TOAST_DURATION_MS = 4800;
 const HOME_BG_URL = "/assets/osnovBanner-v2.jpg";
+const HOME_HERO_BANNER_URL = "/assets/blindBan.png";
 const GAME_BG_URL = "/assets/cardBan-v2.jpg";
 const SPY_IMAGE_URL = "/assets/spy1-v2.png";
 const ELIXIR_IMAGE_URL = "/assets/elik-v2.png";
+const ROLE_MODAL_ANIM_MS = 220;
 const FREQUENT_CARD_IMAGE_URLS = [
   "Рыцарь",
   "Лучницы",
@@ -63,7 +72,60 @@ const FREQUENT_CARD_IMAGE_URLS = [
   "П.Е.К.К.А.",
   "Рыбак",
 ].map((name) => `/api/cards/image?name=${encodeURIComponent(name)}`);
-const CRITICAL_ASSET_URLS = [HOME_BG_URL, GAME_BG_URL, SPY_IMAGE_URL, ELIXIR_IMAGE_URL];
+const CRITICAL_ASSET_URLS = [HOME_BG_URL, HOME_HERO_BANNER_URL, GAME_BG_URL, SPY_IMAGE_URL, ELIXIR_IMAGE_URL];
+
+const IconOffline = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+    <circle cx="12" cy="18.5" r="1.1" fill="currentColor" stroke="none" />
+    <path d="M10.3 5.7h3.4" />
+  </svg>
+);
+
+const IconOnline = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <path d="M12 19.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z" />
+    <path d="M4.5 12h15" />
+    <path d="M12 4.5c2.2 2.1 2.2 12.9 0 15" />
+    <path d="M12 4.5c-2.2 2.1-2.2 12.9 0 15" />
+  </svg>
+);
+
+const IconCreateRoom = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <path d="M4 11V7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5V11" />
+    <path d="M4 11h16v7.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5V11Z" />
+    <path d="M12 8.2v5.6" />
+    <path d="M9.2 11h5.6" />
+  </svg>
+);
+
+const IconJoinRoom = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="14" height="16" rx="2.2" />
+    <path d="m14.5 12 6.5 0" />
+    <path d="m18.5 9 3 3-3 3" />
+    <path d="M7.7 9.5h4.4" />
+    <path d="M7.7 13h4.4" />
+  </svg>
+);
+
+const IconShowCard = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <rect x="4" y="5" width="13" height="16" rx="2.4" />
+    <path d="M8 9.2h5.1" />
+    <path d="M8 12.4h5.1" />
+    <path d="M8 15.6h3.2" />
+    <path d="M17 8.2 20.6 10l-3.6 1.8" />
+  </svg>
+);
+
+const IconStart = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m10 8.8 5.1 3.2-5.1 3.2V8.8Z" fill="currentColor" stroke="none" />
+  </svg>
+);
 
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
@@ -120,25 +182,25 @@ export default function App() {
 
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState<string>("");
-  const [roomRole, setRoomRole] = useState<{
-    role: string;
-    card?: string;
-    image_url?: string;
-    elixir_cost?: number | null;
-  } | null>(null);
+  const [roomRole, setRoomRole] = useState<RolePayload | null>(null);
   const [isRoomRoleOpen, setIsRoomRoleOpen] = useState<boolean>(false);
+  const [isRoomRoleMounted, setIsRoomRoleMounted] = useState<boolean>(false);
+  const [isRoomRoleAnimatingOut, setIsRoomRoleAnimatingOut] = useState<boolean>(false);
   const [roomImageOk, setRoomImageOk] = useState<boolean>(true);
   const [roomCardImageLoaded, setRoomCardImageLoaded] = useState<boolean>(false);
   const [roomStarter, setRoomStarter] = useState<string | null>(null);
   const [showRoomDevTools, setShowRoomDevTools] = useState<boolean>(false);
   const [roomCodeTapCount, setRoomCodeTapCount] = useState<number>(0);
   const [devActionLoading, setDevActionLoading] = useState<boolean>(false);
+  const [homeBannerLoadFailed, setHomeBannerLoadFailed] = useState<boolean>(false);
   const leaveSentRef = useRef<boolean>(false);
   const toastSeqRef = useRef<number>(0);
   const prevRoomInfoRef = useRef<RoomInfo | null>(null);
   const lastForcedRoomStartToastKeyRef = useRef<string>("");
   const offlineRoleImageRenderStartedAtRef = useRef<number | null>(null);
   const roomRoleImageRenderStartedAtRef = useRef<number | null>(null);
+  const roomRoleCloseTimerRef = useRef<number | null>(null);
+  const roomRoleOpenRafRef = useRef<number | null>(null);
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
@@ -263,6 +325,57 @@ export default function App() {
     }, TOAST_DURATION_MS);
   }, []);
 
+  const clearRoomRoleCloseTimer = useCallback(() => {
+    if (roomRoleCloseTimerRef.current !== null) {
+      window.clearTimeout(roomRoleCloseTimerRef.current);
+      roomRoleCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const clearRoomRoleOpenRaf = useCallback(() => {
+    if (roomRoleOpenRafRef.current !== null) {
+      window.cancelAnimationFrame(roomRoleOpenRafRef.current);
+      roomRoleOpenRafRef.current = null;
+    }
+  }, []);
+
+  const forceCloseRoomRoleModal = useCallback(() => {
+    clearRoomRoleOpenRaf();
+    clearRoomRoleCloseTimer();
+    setIsRoomRoleOpen(false);
+    setIsRoomRoleAnimatingOut(false);
+    setIsRoomRoleMounted(false);
+    setRoomRole(null);
+  }, [clearRoomRoleCloseTimer, clearRoomRoleOpenRaf]);
+
+  const closeRoomRoleModal = useCallback(() => {
+    if (!isRoomRoleMounted || isRoomRoleAnimatingOut) return;
+    clearRoomRoleCloseTimer();
+    setIsRoomRoleOpen(false);
+    setIsRoomRoleAnimatingOut(true);
+    roomRoleCloseTimerRef.current = window.setTimeout(() => {
+      setIsRoomRoleAnimatingOut(false);
+      setIsRoomRoleMounted(false);
+      setRoomRole(null);
+      roomRoleCloseTimerRef.current = null;
+    }, ROLE_MODAL_ANIM_MS);
+  }, [clearRoomRoleCloseTimer, isRoomRoleAnimatingOut, isRoomRoleMounted]);
+
+  const openRoomRoleModal = useCallback(
+    (payload: RolePayload) => {
+      clearRoomRoleOpenRaf();
+      clearRoomRoleCloseTimer();
+      setRoomRole(payload);
+      setIsRoomRoleAnimatingOut(false);
+      setIsRoomRoleMounted(true);
+      roomRoleOpenRafRef.current = window.requestAnimationFrame(() => {
+        setIsRoomRoleOpen(true);
+        roomRoleOpenRafRef.current = null;
+      });
+    },
+    [clearRoomRoleCloseTimer, clearRoomRoleOpenRaf]
+  );
+
   const applyOnlineRoomNavigation = useCallback(
     (info: RoomInfo) => {
       const currentScreen = screenRef.current;
@@ -273,7 +386,7 @@ export default function App() {
       const shouldForcePlayingScreen = enteredStartedOrPaused && (currentScreen === "room" || currentScreen === "roomGame");
 
       if (shouldForcePlayingScreen) {
-        setIsRoomRoleOpen(false);
+        forceCloseRoomRoleModal();
         const toastKey = `${info.room_code}:${info.state}:${info.turn_started_at ?? 0}`;
         if (lastForcedRoomStartToastKeyRef.current !== toastKey) {
           lastForcedRoomStartToastKeyRef.current = toastKey;
@@ -286,11 +399,11 @@ export default function App() {
       }
 
       if (currentScreen === "roomGame" && info.state === "waiting") {
-        setIsRoomRoleOpen(false);
+        forceCloseRoomRoleModal();
         setScreen("room");
       }
     },
-    [pushToast]
+    [forceCloseRoomRoleModal, pushToast]
   );
 
   const renderPlayerName = (player: RoomPlayer) => {
@@ -300,10 +413,24 @@ export default function App() {
 
   useEffect(() => {
     screenRef.current = screen;
-    if (screen !== "roomGame" && screen !== "room" && isRoomRoleOpen) {
-      setIsRoomRoleOpen(false);
+    if (screen !== "roomGame" && screen !== "room" && (isRoomRoleOpen || isRoomRoleMounted)) {
+      forceCloseRoomRoleModal();
     }
-  }, [isRoomRoleOpen, screen]);
+  }, [forceCloseRoomRoleModal, isRoomRoleMounted, isRoomRoleOpen, screen]);
+
+  useEffect(
+    () => () => {
+      clearRoomRoleOpenRaf();
+      clearRoomRoleCloseTimer();
+    },
+    [clearRoomRoleCloseTimer, clearRoomRoleOpenRaf]
+  );
+
+  useEffect(() => {
+    if (screen === "format") {
+      setHomeBannerLoadFailed(false);
+    }
+  }, [screen]);
 
   useEffect(() => {
     let canceled = false;
@@ -716,8 +843,7 @@ export default function App() {
     setStarterPlayer(null);
     setOfflineTurn(null);
     setRoomInfo(null);
-    setRoomRole(null);
-    setIsRoomRoleOpen(false);
+    forceCloseRoomRoleModal();
     setRoomStarter(null);
     setShowRoomDevTools(false);
     setRoomCodeTapCount(0);
@@ -1119,13 +1245,12 @@ export default function App() {
       roomRoleImageRenderStartedAtRef.current = performance.now();
       setRoomImageOk(cardPreloadOk);
       setRoomCardImageLoaded(cardMeta.image_url ? cardPreloadOk : true);
-      setRoomRole({
+      openRoomRoleModal({
         role: "card",
         card: cardMeta.name,
         image_url: cardMeta.image_url ?? undefined,
         elixir_cost: cardMeta.elixir_cost ?? null,
       });
-      setIsRoomRoleOpen(true);
       setShowRoomDevTools(false);
     } catch (err) {
       setError(toUserError(err, "Не удалось показать карту"));
@@ -1181,13 +1306,12 @@ export default function App() {
       }
       roomRoleImageRenderStartedAtRef.current = performance.now();
       setRoomCardImageLoaded(res.role === "card" ? cardPreloadOk : true);
-      setRoomRole({
+      openRoomRoleModal({
         role: res.role,
         card: res.card,
         image_url: res.image_url,
         elixir_cost: res.elixir_cost,
       });
-      setIsRoomRoleOpen(true);
     } catch (err) {
       setError(toUserError(err, "Не удалось получить роль"));
     }
@@ -1298,9 +1422,18 @@ export default function App() {
       <div className={`screenContent ${isHome ? "homeContent" : "gameContent"}`}>
         {isHome && (
           <>
-            <header className="homeHeader">
-              <div className="logo">Clash Royale Шпион</div>
-            </header>
+            <div className="homeHeroBanner" aria-label="Баннер Clash Royale Шпион">
+              {!homeBannerLoadFailed ? (
+                <img
+                  src={HOME_HERO_BANNER_URL}
+                  alt="Clash Royale Шпион"
+                  loading="eager"
+                  onError={() => setHomeBannerLoadFailed(true)}
+                />
+              ) : (
+                <div className="homeHeroFallback">Clash Royale Шпион</div>
+              )}
+            </div>
 
             {error && <div className="error">{error}</div>}
             {status && <div className="hint status">{status}</div>}
@@ -1310,11 +1443,17 @@ export default function App() {
                 Выбери формат игры
                 <span>Офлайн — один телефон. Онлайн — каждый игрок у себя.</span>
               </div>
-              <button className="btn full" onClick={() => pickFormat("offline")}>
-                Офлайн
+              <button className="btn full with-icon" onClick={() => pickFormat("offline")}>
+                <span className="btn-icon" aria-hidden="true">
+                  <IconOffline />
+                </span>
+                <span>Офлайн</span>
               </button>
-              <button className="btn secondary full" onClick={() => pickFormat("online")}>
-                Онлайн
+              <button className="btn secondary full with-icon" onClick={() => pickFormat("online")}>
+                <span className="btn-icon" aria-hidden="true">
+                  <IconOnline />
+                </span>
+                <span>Онлайн</span>
               </button>
             </div>
           </>
@@ -1413,23 +1552,29 @@ export default function App() {
             )}
 
             {screen === "onlineMenu" && format === "online" && gameMode && (
-              <div className="card center">
+              <div className="card center online-menu-card">
                 <div className="title">
                   Онлайн режим: {gameMode === "standard" ? "Стандартный" : "Рандом"}
                 </div>
                 <p className="text">Выберите, что хотите сделать.</p>
-                <div className="actions stack">
+                <div className="actions stack online-menu-actions">
                   <button
-                    className="btn full"
+                    className="btn full with-icon"
                     onClick={() => {
                       setRoomPlayerLimit(null);
                       setScreen("roomCreateSettings");
                     }}
                   >
-                    Создать комнату
+                    <span className="btn-icon" aria-hidden="true">
+                      <IconCreateRoom />
+                    </span>
+                    <span>Создать комнату</span>
                   </button>
-                  <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
-                    Подключиться
+                  <button className="btn secondary full with-icon" onClick={() => setScreen("joinRoom")}>
+                    <span className="btn-icon" aria-hidden="true">
+                      <IconJoinRoom />
+                    </span>
+                    <span>Подключиться</span>
                   </button>
                 </div>
               </div>
@@ -1818,12 +1963,18 @@ export default function App() {
                   <>
                     <div className="room-phase-title">Начинает: {starterDisplayName ?? "—"}</div>
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
-                        Показать карту
+                      <button className="btn full with-icon" onClick={handleGetRole}>
+                        <span className="btn-icon" aria-hidden="true">
+                          <IconShowCard />
+                        </span>
+                        <span>Показать карту</span>
                       </button>
                       {roomInfo.you_are_owner && (
-                        <button className="btn secondary full" onClick={handleStartRoomTurn}>
-                          Начать игру
+                        <button className="btn secondary full with-icon" onClick={handleStartRoomTurn}>
+                          <span className="btn-icon" aria-hidden="true">
+                            <IconStart />
+                          </span>
+                          <span>Начать игру</span>
                         </button>
                       )}
                     </div>
@@ -1842,8 +1993,11 @@ export default function App() {
                     )}
 
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
-                        Показать карту
+                      <button className="btn full with-icon" onClick={handleGetRole}>
+                        <span className="btn-icon" aria-hidden="true">
+                          <IconShowCard />
+                        </span>
+                        <span>Показать карту</span>
                       </button>
 
                       {roomInfo.you_are_owner && roomPhase === "paused" && (
@@ -1892,8 +2046,11 @@ export default function App() {
                   <>
                     <div className="room-phase-title">Игра запущена</div>
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
-                        Показать карту
+                      <button className="btn full with-icon" onClick={handleGetRole}>
+                        <span className="btn-icon" aria-hidden="true">
+                          <IconShowCard />
+                        </span>
+                        <span>Показать карту</span>
                       </button>
                     </div>
                     <button className="leave-link" onClick={handleLeaveRoom}>
@@ -1904,8 +2061,8 @@ export default function App() {
               </div>
             )}
 
-            {(screen === "roomGame" || screen === "room") && isRoomRoleOpen && roomRole && (
-              <div className="role-modal-backdrop" onClick={() => setIsRoomRoleOpen(false)}>
+            {(screen === "roomGame" || screen === "room") && isRoomRoleMounted && roomRole && (
+              <div className={`role-modal-backdrop ${isRoomRoleOpen ? "is-open" : ""}`} onClick={closeRoomRoleModal}>
                 <div className="card role-modal-card" onClick={(event) => event.stopPropagation()}>
                   <div className="title">Твоя роль</div>
                   {roomRole.role === "spy" && (
@@ -1944,7 +2101,7 @@ export default function App() {
                   )}
                   <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
                   <div className="actions">
-                    <button className="btn" onClick={() => setIsRoomRoleOpen(false)}>
+                    <button className="btn" onClick={closeRoomRoleModal}>
                       Закрыть
                     </button>
                   </div>
