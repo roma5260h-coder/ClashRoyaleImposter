@@ -152,10 +152,10 @@ body {
 
 .homeHeroBanner {
   position: absolute;
-  top: clamp(36px, 8vh, 92px);
+  top: clamp(28px, 6vh, 78px);
   left: 50%;
   transform: translateX(-50%);
-  width: min(640px, 84vw);
+  width: min(920px, 96vw);
   display: flex;
   justify-content: center;
   z-index: 1;
@@ -180,7 +180,7 @@ body {
   z-index: 1;
   width: 100%;
   height: auto;
-  max-height: clamp(116px, 19vh, 175px);
+  max-height: clamp(250px, 40vh, 390px);
   object-fit: contain;
   display: block;
   filter: brightness(1.17) saturate(1.2) drop-shadow(0 14px 30px rgba(2, 8, 22, 0.52));
