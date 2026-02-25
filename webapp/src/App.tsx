@@ -58,7 +58,7 @@ const ROOM_DEV_LOGS = import.meta.env.DEV || import.meta.env.VITE_ROOM_DEBUG ===
 const IMAGE_DEBUG_LOGS =
   ROOM_DEV_LOGS || import.meta.env.VITE_CARD_IMAGE_DEBUG === "1" || import.meta.env.VITE_IMAGE_DEBUG === "1";
 const TOAST_DURATION_MS = 4800;
-const HOME_BG_URL = "/assets/osnovBanner-v2.jpg";
+const HOME_BG_URL = "/assets/newBack.png";
 const HOME_HERO_BANNER_URL = "/assets/blindBan.png";
 const GAME_BG_URL = "/assets/cardBan-v2.jpg";
 const SPY_IMAGE_URL = "/assets/spy1-v2.png";

@@ -152,10 +152,10 @@ body {
 
 .homeHeroBanner {
   position: absolute;
-  top: clamp(74px, 14vh, 138px);
+  top: clamp(36px, 8vh, 92px);
   left: 50%;
   transform: translateX(-50%);
-  width: min(760px, 93vw);
+  width: min(640px, 84vw);
   display: flex;
   justify-content: center;
   z-index: 1;
@@ -165,10 +165,10 @@ body {
 .homeHeroBanner::before {
   content: "";
   position: absolute;
-  left: 12%;
-  right: 12%;
-  bottom: -18%;
-  height: 52%;
+  left: 16%;
+  right: 16%;
+  bottom: -22%;
+  height: 44%;
   z-index: 0;
   background: radial-gradient(circle at 50% 40%, rgba(255, 209, 102, 0.54) 0%, rgba(123, 223, 242, 0.2) 42%, rgba(123, 223, 242, 0) 72%);
   filter: blur(24px);
@@ -180,7 +180,7 @@ body {
   z-index: 1;
   width: 100%;
   height: auto;
-  max-height: clamp(190px, 34vh, 320px);
+  max-height: clamp(116px, 19vh, 175px);
   object-fit: contain;
   display: block;
   filter: brightness(1.17) saturate(1.2) drop-shadow(0 14px 30px rgba(2, 8, 22, 0.52));
