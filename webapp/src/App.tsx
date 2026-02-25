@@ -1490,8 +1490,11 @@ export default function App() {
             )}
 
             {screen === "playMode" && (
-              <div className="card bottom">
+              <div className="card center play-mode-card">
                 <div className="title">Выбери режим</div>
+                <div className="mode-preview" aria-hidden="true">
+                  <img className="mode-preview-art" src={SPY_IMAGE_URL} alt="" loading="eager" />
+                </div>
                 <div className="actions stack">
                   <button className="btn full" onClick={pickStandardMode}>
                     Стандартный
