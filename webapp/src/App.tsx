@@ -76,54 +76,38 @@ const CRITICAL_ASSET_URLS = [HOME_BG_URL, HOME_HERO_BANNER_URL, GAME_BG_URL, SPY
 
 const IconOffline = () => (
   <svg viewBox="0 0 24 24" fill="none">
-    <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
-    <circle cx="12" cy="18.5" r="1.1" fill="currentColor" stroke="none" />
-    <path d="M10.3 5.7h3.4" />
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.8" />
+    <path d="M10.1 6.4h3.8" />
+    <circle cx="12" cy="18.3" r="1.25" />
+    <path d="M3.9 9.1h1.8M3.9 12.1h1.8M3.9 15.1h1.8" />
   </svg>
 );
 
 const IconOnline = () => (
   <svg viewBox="0 0 24 24" fill="none">
-    <path d="M12 19.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z" />
-    <path d="M4.5 12h15" />
-    <path d="M12 4.5c2.2 2.1 2.2 12.9 0 15" />
-    <path d="M12 4.5c-2.2 2.1-2.2 12.9 0 15" />
+    <circle cx="12" cy="12" r="8.6" />
+    <path d="M3.4 12h17.2" />
+    <path d="M12 3.4c2.6 2.3 2.6 14.9 0 17.2" />
+    <path d="M12 3.4c-2.6 2.3-2.6 14.9 0 17.2" />
+    <path d="M5.2 7.8c2 .9 4.4 1.4 6.8 1.4s4.8-.5 6.8-1.4" />
+    <path d="M5.2 16.2c2-.9 4.4-1.4 6.8-1.4s4.8.5 6.8 1.4" />
   </svg>
 );
 
-const IconCreateRoom = () => (
+const IconStandard = () => (
   <svg viewBox="0 0 24 24" fill="none">
-    <path d="M4 11V7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5V11" />
-    <path d="M4 11h16v7.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5V11Z" />
-    <path d="M12 8.2v5.6" />
-    <path d="M9.2 11h5.6" />
+    <path d="M12 3.1 18.2 5.6v5.3c0 4.2-2.4 7.8-6.2 9.8-3.8-2-6.2-5.6-6.2-9.8V5.6L12 3.1Z" />
+    <path d="m8.8 11.7 2.1 2.1 4.4-4.4" />
   </svg>
 );
 
-const IconJoinRoom = () => (
+const IconRandom = () => (
   <svg viewBox="0 0 24 24" fill="none">
-    <rect x="3" y="4" width="14" height="16" rx="2.2" />
-    <path d="m14.5 12 6.5 0" />
-    <path d="m18.5 9 3 3-3 3" />
-    <path d="M7.7 9.5h4.4" />
-    <path d="M7.7 13h4.4" />
-  </svg>
-);
-
-const IconShowCard = () => (
-  <svg viewBox="0 0 24 24" fill="none">
-    <rect x="4" y="5" width="13" height="16" rx="2.4" />
-    <path d="M8 9.2h5.1" />
-    <path d="M8 12.4h5.1" />
-    <path d="M8 15.6h3.2" />
-    <path d="M17 8.2 20.6 10l-3.6 1.8" />
-  </svg>
-);
-
-const IconStart = () => (
-  <svg viewBox="0 0 24 24" fill="none">
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="m10 8.8 5.1 3.2-5.1 3.2V8.8Z" fill="currentColor" stroke="none" />
+    <rect x="4.4" y="4.4" width="15.2" height="15.2" rx="3.1" />
+    <path d="M9.9 9.8a2.05 2.05 0 0 1 4.1 0c0 .9-.6 1.4-1.25 1.9-.5.3-.85.7-.85 1.25v.5" />
+    <circle cx="11.95" cy="15.95" r="0.95" />
+    <circle cx="7.7" cy="8.1" r="0.8" />
+    <circle cx="16.3" cy="16.2" r="0.8" />
   </svg>
 );
 
@@ -1493,11 +1477,17 @@ export default function App() {
               <div className="card center play-mode-card">
                 <div className="title">Выбери режим</div>
                 <div className="actions stack">
-                  <button className="btn full" onClick={pickStandardMode}>
-                    Стандартный
+                  <button className="btn full with-icon" onClick={pickStandardMode}>
+                    <span className="btn-icon" aria-hidden="true">
+                      <IconStandard />
+                    </span>
+                    <span>Стандартный</span>
                   </button>
-                  <button className="btn secondary full" onClick={pickRandomMode}>
-                    Рандом
+                  <button className="btn secondary full with-icon" onClick={pickRandomMode}>
+                    <span className="btn-icon" aria-hidden="true">
+                      <IconRandom />
+                    </span>
+                    <span>Рандом</span>
                   </button>
                 </div>
               </div>
@@ -1559,22 +1549,16 @@ export default function App() {
                 <p className="text">Выберите, что хотите сделать.</p>
                 <div className="actions stack online-menu-actions">
                   <button
-                    className="btn full with-icon"
+                    className="btn full"
                     onClick={() => {
                       setRoomPlayerLimit(null);
                       setScreen("roomCreateSettings");
                     }}
                   >
-                    <span className="btn-icon" aria-hidden="true">
-                      <IconCreateRoom />
-                    </span>
-                    <span>Создать комнату</span>
+                    Создать комнату
                   </button>
-                  <button className="btn secondary full with-icon" onClick={() => setScreen("joinRoom")}>
-                    <span className="btn-icon" aria-hidden="true">
-                      <IconJoinRoom />
-                    </span>
-                    <span>Подключиться</span>
+                  <button className="btn secondary full" onClick={() => setScreen("joinRoom")}>
+                    Подключиться
                   </button>
                 </div>
               </div>
@@ -1963,18 +1947,12 @@ export default function App() {
                   <>
                     <div className="room-phase-title">Начинает: {starterDisplayName ?? "—"}</div>
                     <div className="actions stack">
-                      <button className="btn full with-icon" onClick={handleGetRole}>
-                        <span className="btn-icon" aria-hidden="true">
-                          <IconShowCard />
-                        </span>
-                        <span>Показать карту</span>
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
                       </button>
                       {roomInfo.you_are_owner && (
-                        <button className="btn secondary full with-icon" onClick={handleStartRoomTurn}>
-                          <span className="btn-icon" aria-hidden="true">
-                            <IconStart />
-                          </span>
-                          <span>Начать игру</span>
+                        <button className="btn secondary full" onClick={handleStartRoomTurn}>
+                          Начать игру
                         </button>
                       )}
                     </div>
@@ -1993,11 +1971,8 @@ export default function App() {
                     )}
 
                     <div className="actions stack">
-                      <button className="btn full with-icon" onClick={handleGetRole}>
-                        <span className="btn-icon" aria-hidden="true">
-                          <IconShowCard />
-                        </span>
-                        <span>Показать карту</span>
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
                       </button>
 
                       {roomInfo.you_are_owner && roomPhase === "paused" && (
@@ -2046,11 +2021,8 @@ export default function App() {
                   <>
                     <div className="room-phase-title">Игра запущена</div>
                     <div className="actions stack">
-                      <button className="btn full with-icon" onClick={handleGetRole}>
-                        <span className="btn-icon" aria-hidden="true">
-                          <IconShowCard />
-                        </span>
-                        <span>Показать карту</span>
+                      <button className="btn full" onClick={handleGetRole}>
+                        Показать карту
                       </button>
                     </div>
                     <button className="leave-link" onClick={handleLeaveRoom}>
