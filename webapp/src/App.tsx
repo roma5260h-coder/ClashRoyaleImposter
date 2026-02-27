@@ -922,13 +922,17 @@ export default function App() {
 
     try {
       const res = await api.offlineReveal(apiConfig, offlineSessionId);
-      let cardPreloadOk = true;
-      if (res.role === "card" && res.image_url) {
-        const preloadResult = await preloadRoleCardImage(res.image_url, "offline_reveal");
-        cardPreloadOk = Boolean(preloadResult?.ok);
+      const isCardRole = res.role === "card" && Boolean(res.image_url);
+      let isCardImageLoaded = true;
+      if (isCardRole && res.image_url) {
+        const resolvedSrc = resolveImageUrl(res.image_url);
+        isCardImageLoaded = imagePreloader.isLoaded(resolvedSrc);
+        if (!isCardImageLoaded) {
+          void preloadRoleCardImage(res.image_url, "offline_reveal");
+        }
       }
       offlineRoleImageRenderStartedAtRef.current = performance.now();
-      setOfflineCardImageLoaded(res.role === "card" ? cardPreloadOk : true);
+      setOfflineCardImageLoaded(isCardRole ? isCardImageLoaded : true);
       setOfflineRole({
         role: res.role,
         card: res.card,
@@ -968,6 +972,12 @@ export default function App() {
     } catch (err) {
       setError(toUserError(err, "Не удалось продолжить"));
     }
+  };
+
+  const handleExitOfflineFlow = () => {
+    const ok = window.confirm("Вы точно хотите выйти из игры?");
+    if (!ok) return;
+    resetAll();
   };
 
   const handleStartOfflineTurn = async () => {
@@ -1695,6 +1705,9 @@ export default function App() {
                     Показать карту
                   </button>
                 </div>
+                <button className="leave-link" onClick={handleExitOfflineFlow}>
+                  Выйти из игры
+                </button>
               </div>
             )}
 
@@ -1741,6 +1754,9 @@ export default function App() {
                     Закрыть
                   </button>
                 </div>
+                <button className="leave-link" onClick={handleExitOfflineFlow}>
+                  Выйти из игры
+                </button>
               </div>
             )}
 
@@ -1753,6 +1769,9 @@ export default function App() {
                     Продолжить
                   </button>
                 </div>
+                <button className="leave-link" onClick={handleExitOfflineFlow}>
+                  Выйти из игры
+                </button>
               </div>
             )}
 
