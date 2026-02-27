@@ -152,9 +152,9 @@ body {
 
 .homeHeroBanner {
   position: absolute;
-  top: clamp(-198px, -25vh, -102px);
+  top: clamp(-210px, -27vh, -114px);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + 10px));
   width: min(2050px, 175vw);
   display: flex;
   justify-content: center;
@@ -183,7 +183,7 @@ body {
   max-height: clamp(560px, 88vh, 980px);
   object-fit: contain;
   display: block;
-  filter: brightness(0.98) saturate(1.08) drop-shadow(0 14px 30px rgba(2, 8, 22, 0.52));
+  filter: brightness(0.955) saturate(1.06) drop-shadow(0 14px 30px rgba(2, 8, 22, 0.52));
 }
 
 .homeHeroFallback {
