@@ -154,7 +154,7 @@ body {
   position: absolute;
   top: clamp(-210px, -27vh, -114px);
   left: 50%;
-  transform: translateX(calc(-50% + 10px));
+  transform: translateX(calc(-50% + 6px));
   width: min(2050px, 175vw);
   display: flex;
   justify-content: center;
