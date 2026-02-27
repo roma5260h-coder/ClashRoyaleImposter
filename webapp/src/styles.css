@@ -6,6 +6,7 @@
   --card-border: rgba(255, 255, 255, 0.12);
   --accent: #ffd166;
   --accent-2: #7bdff2;
+  --starter-accent: #9CCB6B;
   --text: #f6f7fb;
   --muted: rgba(246, 247, 251, 0.72);
   --danger: #ff6b6b;
@@ -242,6 +243,16 @@ body {
   margin: 0;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.starter-highlight {
+  color: var(--starter-accent);
+  font-weight: 700;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+.text.starter-highlight {
+  line-height: 1.45;
 }
 
 .actions {

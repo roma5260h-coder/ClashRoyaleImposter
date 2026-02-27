@@ -1759,7 +1759,7 @@ export default function App() {
             {screen === "offlineFinished" && (
               <div className="card center">
                 <div className="title">Роли розданы</div>
-                <p className="text">Игру начинает: Игрок {starterPlayer ?? "?"}</p>
+                <p className="text starter-highlight">Игру начинает: Игрок {starterPlayer ?? "?"}</p>
                 <div className="actions stack">
                   <button className="btn full" onClick={handleRestartOffline}>
                     Сыграть ещё
@@ -1776,7 +1776,7 @@ export default function App() {
                 {offlineTurn.turn_state === "ready_to_start" && (
                   <>
                     <div className="title">Роли розданы</div>
-                    <p className="text">Игру начинает: Игрок {starterPlayer ?? offlineTurn.current_player_number}</p>
+                    <p className="text starter-highlight">Игру начинает: Игрок {starterPlayer ?? offlineTurn.current_player_number}</p>
                     <div className="actions">
                       <button className="btn" onClick={handleStartOfflineTurn}>
                         Начать игру
@@ -1945,7 +1945,7 @@ export default function App() {
               <div className={`card center room-game-card room-phase-${roomPhase}`}>
                 {roomPhase === "ready" && (
                   <>
-                    <div className="room-phase-title">Начинает: {starterDisplayName ?? "—"}</div>
+                    <div className="room-phase-title starter-highlight">Начинает: {starterDisplayName ?? "—"}</div>
                     <div className="actions stack">
                       <button className="btn full" onClick={handleGetRole}>
                         Показать карту
@@ -1964,7 +1964,7 @@ export default function App() {
 
                 {(roomPhase === "playing" || roomPhase === "paused") && (
                   <>
-                    <div className="room-phase-title">{roomPlayingTitle}</div>
+                    <div className={`room-phase-title ${!roomInfo.timer_enabled ? "starter-highlight" : ""}`}>{roomPlayingTitle}</div>
                     {roomInfo.timer_enabled && renderTurnProgress()}
                     {roomInfo.state === "paused" && (
                       <div className="hint danger">Игра на паузе. Таймер остановлен.</div>
