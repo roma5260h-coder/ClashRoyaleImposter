@@ -92,6 +92,9 @@ export const api = {
   offlineTurnStart: (config: ApiConfig, sessionId: string) =>
     post<OfflineTurnStatus>(config, "/api/offline/turn/start", { session_id: sessionId }),
 
+  offlineTurnSkip: (config: ApiConfig, sessionId: string) =>
+    post<OfflineTurnStatus>(config, "/api/offline/turn/skip", { session_id: sessionId }),
+
   offlineTurnFinish: (config: ApiConfig, sessionId: string) =>
     post<OfflineTurnStatus>(config, "/api/offline/turn/finish", { session_id: sessionId }),
 
@@ -139,6 +142,9 @@ export const api = {
 
   roomTurnStart: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/turn/start", { room_code: roomCode }),
+
+  roomTurnSkip: (config: ApiConfig, roomCode: string) =>
+    post<RoomInfo>(config, "/api/room/turn/skip", { room_code: roomCode }),
 
   roomTurnFinish: (config: ApiConfig, roomCode: string) =>
     post<RoomInfo>(config, "/api/room/turn/finish", { room_code: roomCode }),

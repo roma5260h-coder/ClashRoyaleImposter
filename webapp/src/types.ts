@@ -32,6 +32,8 @@ export type RoomInfo = {
   current_turn_name?: string | null;
   turn_started_at?: number | null;
   turns_completed?: boolean;
+  round_id?: number;
+  can_skip_timer?: boolean;
   status_message?: string | null;
   can_manage_bots?: boolean;
 };

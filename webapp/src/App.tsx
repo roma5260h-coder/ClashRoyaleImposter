@@ -41,6 +41,12 @@ type RolePayload = {
   elixir_cost?: number | null;
 };
 
+type PrefetchedRole = {
+  payload: RolePayload;
+  preloadedImage: boolean;
+  ts: number;
+};
+
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
 const GENERIC_ERROR_MESSAGE = "Произошла ошибка, попробуйте ещё раз";
@@ -185,6 +191,10 @@ export default function App() {
   const roomRoleImageRenderStartedAtRef = useRef<number | null>(null);
   const roomRoleCloseTimerRef = useRef<number | null>(null);
   const roomRoleOpenRafRef = useRef<number | null>(null);
+  const offlinePrefetchRef = useRef<Map<string, PrefetchedRole>>(new Map());
+  const offlinePrefetchInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const roomPrefetchRef = useRef<Map<string, PrefetchedRole>>(new Map());
+  const roomPrefetchInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const [turnRemainingMs, setTurnRemainingMs] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
@@ -225,6 +235,16 @@ export default function App() {
     },
     [apiBase, logImageDebug]
   );
+
+  const clearOfflinePrefetchCache = useCallback(() => {
+    offlinePrefetchRef.current.clear();
+    offlinePrefetchInFlightRef.current.clear();
+  }, []);
+
+  const clearRoomPrefetchCache = useCallback(() => {
+    roomPrefetchRef.current.clear();
+    roomPrefetchInFlightRef.current.clear();
+  }, []);
 
   const handleOfflineCardImageLoad = useCallback((src: string) => {
     setOfflineCardImageLoaded(true);
@@ -358,6 +378,146 @@ export default function App() {
       });
     },
     [clearRoomRoleCloseTimer, clearRoomRoleOpenRaf]
+  );
+
+  const applyOfflineRolePayload = useCallback(
+    (payload: RolePayload, knownPreloadedImage?: boolean) => {
+      const isCardRole = payload.role === "card" && Boolean(payload.image_url);
+      let isCardImageLoaded = true;
+      if (isCardRole && payload.image_url) {
+        const resolvedSrc = resolveImageUrl(payload.image_url);
+        isCardImageLoaded = knownPreloadedImage ?? imagePreloader.isLoaded(resolvedSrc);
+        if (!isCardImageLoaded) {
+          void preloadRoleCardImage(payload.image_url, "offline_role_open");
+        }
+      }
+      offlineRoleImageRenderStartedAtRef.current = performance.now();
+      setOfflineImageOk(true);
+      setOfflineCardImageLoaded(isCardRole ? isCardImageLoaded : true);
+      setOfflineRole(payload);
+      setScreen("offlineRole");
+    },
+    [apiBase, preloadRoleCardImage]
+  );
+
+  const applyRoomRolePayload = useCallback(
+    (payload: RolePayload, knownPreloadedImage?: boolean) => {
+      const isCardRole = payload.role === "card" && Boolean(payload.image_url);
+      let isCardImageLoaded = true;
+      if (isCardRole && payload.image_url) {
+        const resolvedSrc = resolveImageUrl(payload.image_url);
+        isCardImageLoaded = knownPreloadedImage ?? imagePreloader.isLoaded(resolvedSrc);
+        if (!isCardImageLoaded) {
+          void preloadRoleCardImage(payload.image_url, "room_role_open");
+        }
+      }
+      roomRoleImageRenderStartedAtRef.current = performance.now();
+      setRoomImageOk(true);
+      setRoomCardImageLoaded(isCardRole ? isCardImageLoaded : true);
+      openRoomRoleModal(payload);
+    },
+    [apiBase, openRoomRoleModal, preloadRoleCardImage]
+  );
+
+  const prefetchOfflineRole = useCallback(
+    async (sessionId: string, playerNumber: number) => {
+      const key = `${sessionId}:${playerNumber}`;
+      if (offlinePrefetchRef.current.has(key)) return;
+      const inFlight = offlinePrefetchInFlightRef.current.get(key);
+      if (inFlight) {
+        await inFlight;
+        return;
+      }
+
+      const task = (async () => {
+        try {
+          const res = await api.offlineReveal(apiConfig, sessionId);
+          if (res.player_number !== playerNumber) {
+            return;
+          }
+
+          const payload: RolePayload = {
+            role: res.role,
+            card: res.card,
+            image_url: res.image_url,
+            elixir_cost: res.elixir_cost,
+          };
+
+          let preloadedImage = true;
+          if (payload.role === "card" && payload.image_url) {
+            const resolvedSrc = resolveImageUrl(payload.image_url);
+            preloadedImage = imagePreloader.isLoaded(resolvedSrc);
+            if (!preloadedImage) {
+              const preloadResult = await preloadRoleCardImage(payload.image_url, "offline_prefetch");
+              preloadedImage = Boolean(preloadResult?.ok);
+            }
+          }
+
+          offlinePrefetchRef.current.set(key, {
+            payload,
+            preloadedImage,
+            ts: Date.now(),
+          });
+        } catch {
+          // ignore prefetch errors; reveal has direct fallback
+        } finally {
+          offlinePrefetchInFlightRef.current.delete(key);
+        }
+      })();
+
+      offlinePrefetchInFlightRef.current.set(key, task);
+      await task;
+    },
+    [apiBase, apiConfig, preloadRoleCardImage]
+  );
+
+  const prefetchRoomRole = useCallback(
+    async (roomCode: string, roundId: number) => {
+      if (roundId <= 0) return;
+      const key = `${roomCode}:${roundId}`;
+      if (roomPrefetchRef.current.has(key)) return;
+      const inFlight = roomPrefetchInFlightRef.current.get(key);
+      if (inFlight) {
+        await inFlight;
+        return;
+      }
+
+      const task = (async () => {
+        try {
+          const res = await api.roomRole(apiConfig, roomCode);
+          const payload: RolePayload = {
+            role: res.role,
+            card: res.card,
+            image_url: res.image_url,
+            elixir_cost: res.elixir_cost,
+          };
+
+          let preloadedImage = true;
+          if (payload.role === "card" && payload.image_url) {
+            const resolvedSrc = resolveImageUrl(payload.image_url);
+            preloadedImage = imagePreloader.isLoaded(resolvedSrc);
+            if (!preloadedImage) {
+              const preloadResult = await preloadRoleCardImage(payload.image_url, "room_prefetch");
+              preloadedImage = Boolean(preloadResult?.ok);
+            }
+          }
+
+          roomPrefetchRef.current.set(key, {
+            payload,
+            preloadedImage,
+            ts: Date.now(),
+          });
+        } catch {
+          // ignore prefetch errors; role modal has direct fallback
+        } finally {
+          roomPrefetchInFlightRef.current.delete(key);
+        }
+      })();
+
+      roomPrefetchInFlightRef.current.set(key, task);
+      await task;
+    },
+    [apiBase, apiConfig, preloadRoleCardImage]
   );
 
   const applyOnlineRoomNavigation = useCallback(
@@ -673,6 +833,27 @@ export default function App() {
   }, [apiConfig, offlineSessionId, offlineTimerEnabled, offlineTurn?.turn_state, screen]);
 
   useEffect(() => {
+    clearOfflinePrefetchCache();
+  }, [clearOfflinePrefetchCache, offlineSessionId]);
+
+  useEffect(() => {
+    if (screen !== "offlinePlayer" || !offlineSessionId) return;
+    void prefetchOfflineRole(offlineSessionId, currentPlayer);
+  }, [currentPlayer, offlineSessionId, prefetchOfflineRole, screen]);
+
+  useEffect(() => {
+    clearRoomPrefetchCache();
+  }, [clearRoomPrefetchCache, roomInfo?.room_code, roomInfo?.round_id]);
+
+  useEffect(() => {
+    if (screen !== "roomGame" || !roomInfo) return;
+    if (roomInfo.state !== "started" && roomInfo.state !== "paused") return;
+    const roundId = roomInfo.round_id ?? 0;
+    if (roundId <= 0) return;
+    void prefetchRoomRole(roomInfo.room_code, roundId);
+  }, [prefetchRoomRole, roomInfo, screen]);
+
+  useEffect(() => {
     setOfflineImageOk(true);
     offlineRoleImageRenderStartedAtRef.current = null;
   }, [offlineRole?.image_url, offlineRole?.role]);
@@ -820,6 +1001,8 @@ export default function App() {
 
   const clearSessionData = () => {
     leaveSentRef.current = false;
+    clearOfflinePrefetchCache();
+    clearRoomPrefetchCache();
     setPendingOfflineCount(null);
     setOfflineSessionId(null);
     setOfflineTimerEnabled(false);
@@ -921,25 +1104,36 @@ export default function App() {
     setError(null);
 
     try {
-      const res = await api.offlineReveal(apiConfig, offlineSessionId);
-      const isCardRole = res.role === "card" && Boolean(res.image_url);
-      let isCardImageLoaded = true;
-      if (isCardRole && res.image_url) {
-        const resolvedSrc = resolveImageUrl(res.image_url);
-        isCardImageLoaded = imagePreloader.isLoaded(resolvedSrc);
-        if (!isCardImageLoaded) {
-          void preloadRoleCardImage(res.image_url, "offline_reveal");
-        }
+      const key = `${offlineSessionId}:${currentPlayer}`;
+      const prefetched = offlinePrefetchRef.current.get(key);
+      if (prefetched) {
+        applyOfflineRolePayload(prefetched.payload, prefetched.preloadedImage);
+        return;
       }
-      offlineRoleImageRenderStartedAtRef.current = performance.now();
-      setOfflineCardImageLoaded(isCardRole ? isCardImageLoaded : true);
-      setOfflineRole({
+
+      const res = await api.offlineReveal(apiConfig, offlineSessionId);
+      const payload: RolePayload = {
         role: res.role,
         card: res.card,
         image_url: res.image_url,
         elixir_cost: res.elixir_cost,
+      };
+      const isCardRole = payload.role === "card" && Boolean(payload.image_url);
+      let preloadedImage = true;
+      if (isCardRole && payload.image_url) {
+        const resolvedSrc = resolveImageUrl(payload.image_url);
+        preloadedImage = imagePreloader.isLoaded(resolvedSrc);
+        if (!preloadedImage) {
+          void preloadRoleCardImage(payload.image_url, "offline_reveal_fallback");
+        }
+      }
+
+      offlinePrefetchRef.current.set(key, {
+        payload,
+        preloadedImage,
+        ts: Date.now(),
       });
-      setScreen("offlineRole");
+      applyOfflineRolePayload(payload, preloadedImage);
     } catch (err) {
       setError(toUserError(err, "Не удалось показать роль"));
     }
@@ -986,6 +1180,18 @@ export default function App() {
 
     try {
       const turn = await api.offlineTurnStart(apiConfig, offlineSessionId);
+      setOfflineTurn(turn);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
+  const handleSkipOfflineTurn = async () => {
+    if (!offlineSessionId) return;
+    setError(null);
+
+    try {
+      const turn = await api.offlineTurnSkip(apiConfig, offlineSessionId);
       setOfflineTurn(turn);
     } catch (err) {
       setError(toUserError(err, GENERIC_ERROR_MESSAGE));
@@ -1158,6 +1364,18 @@ export default function App() {
     }
   };
 
+  const handleSkipRoomTurn = async () => {
+    if (!roomInfo) return;
+    setError(null);
+
+    try {
+      const info = await api.roomTurnSkip(apiConfig, roomInfo.room_code);
+      setRoomInfo(info);
+    } catch (err) {
+      setError(toUserError(err, GENERIC_ERROR_MESSAGE));
+    }
+  };
+
   const handleResumeRoom = async () => {
     if (!roomInfo) return;
     setError(null);
@@ -1292,20 +1510,40 @@ export default function App() {
     setError(null);
 
     try {
-      const res = await api.roomRole(apiConfig, roomInfo.room_code);
-      let cardPreloadOk = true;
-      if (res.role === "card" && res.image_url) {
-        const preloadResult = await preloadRoleCardImage(res.image_url, "room_role");
-        cardPreloadOk = Boolean(preloadResult?.ok);
+      const roundId = roomInfo.round_id ?? 0;
+      const prefetchKey = `${roomInfo.room_code}:${roundId}`;
+      if (roundId > 0) {
+        const prefetched = roomPrefetchRef.current.get(prefetchKey);
+        if (prefetched) {
+          applyRoomRolePayload(prefetched.payload, prefetched.preloadedImage);
+          return;
+        }
       }
-      roomRoleImageRenderStartedAtRef.current = performance.now();
-      setRoomCardImageLoaded(res.role === "card" ? cardPreloadOk : true);
-      openRoomRoleModal({
+
+      const res = await api.roomRole(apiConfig, roomInfo.room_code);
+      const payload: RolePayload = {
         role: res.role,
         card: res.card,
         image_url: res.image_url,
         elixir_cost: res.elixir_cost,
-      });
+      };
+      const isCardRole = payload.role === "card" && Boolean(payload.image_url);
+      let preloadedImage = true;
+      if (isCardRole && payload.image_url) {
+        const resolvedSrc = resolveImageUrl(payload.image_url);
+        preloadedImage = imagePreloader.isLoaded(resolvedSrc);
+        if (!preloadedImage) {
+          void preloadRoleCardImage(payload.image_url, "room_role_fallback");
+        }
+      }
+      if (roundId > 0) {
+        roomPrefetchRef.current.set(prefetchKey, {
+          payload,
+          preloadedImage,
+          ts: Date.now(),
+        });
+      }
+      applyRoomRolePayload(payload, preloadedImage);
     } catch (err) {
       setError(toUserError(err, "Не удалось получить роль"));
     }
@@ -1466,7 +1704,7 @@ export default function App() {
             </header>
             {showOfflineExitTopButton && (
               <button className="top-exit-btn" onClick={handleExitOfflineFlow}>
-                Выйти из игры
+                ← Выйти
               </button>
             )}
 
@@ -1807,6 +2045,9 @@ export default function App() {
                     <p className="text">Переход к следующему игроку происходит автоматически по таймеру.</p>
                     {renderTurnProgress()}
                     <div className="actions">
+                      <button className="btn skip-timer" onClick={handleSkipOfflineTurn}>
+                        ⏭ Пропустить таймер
+                      </button>
                       <button className="btn secondary" onClick={handleFinishOfflineTurn}>
                         Игра окончена
                       </button>
@@ -1990,6 +2231,11 @@ export default function App() {
                       <button className="btn full" onClick={handleGetRole}>
                         Показать карту
                       </button>
+                      {roomPhase === "playing" && roomInfo.timer_enabled && roomInfo.can_skip_timer && (
+                        <button className="btn skip-timer full" onClick={handleSkipRoomTurn}>
+                          ⏭ Пропустить таймер
+                        </button>
+                      )}
 
                       {roomInfo.you_are_owner && roomPhase === "paused" && (
                         <button className="btn full" onClick={handleResumeRoom}>

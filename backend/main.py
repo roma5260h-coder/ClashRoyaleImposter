@@ -291,6 +291,8 @@ class RoomInfo(BaseModel):
     current_turn_name: Optional[str] = None
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
+    round_id: int = 0
+    can_skip_timer: bool = False
     status_message: Optional[str] = None
     can_manage_bots: bool = False
 
@@ -384,6 +386,7 @@ class RoomSession:
     turn_state: str = TURN_STATE_WAITING
     turn_started_at: Optional[float] = None
     turns_completed: bool = False
+    round_id: int = 0
     spy_user_ids: List[PlayerId] = field(default_factory=list)
     cards_by_user: Dict[PlayerId, Optional[str]] = field(default_factory=dict)
     state: str = ROOM_STATE_WAITING
@@ -1383,6 +1386,32 @@ async def offline_turn_start(request: OfflineTurnRequest) -> OfflineTurnStatusRe
     return build_offline_turn_status_response(session)
 
 
+@app.post("/api/offline/turn/skip", response_model=OfflineTurnStatusResponse)
+async def offline_turn_skip(request: OfflineTurnRequest) -> OfflineTurnStatusResponse:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+
+    session = offline_sessions.get(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not session.timer_enabled:
+        raise HTTPException(status_code=400, detail="Timer disabled")
+    if not normalize_offline_turn_state(session):
+        raise HTTPException(status_code=400, detail="Timer disabled")
+    if session.state != TURN_STATE_ACTIVE or not session.turn_active:
+        raise HTTPException(status_code=400, detail="Таймер не активен")
+
+    session.current_turn_index = (session.current_turn_index + 1) % len(session.players_order)
+    session.turn_started_at = time.time()
+    session.turn_active = True
+    session.state = TURN_STATE_ACTIVE
+    session.turns_completed = False
+    return build_offline_turn_status_response(session)
+
+
 @app.post("/api/offline/turn/finish", response_model=OfflineTurnStatusResponse)
 async def offline_turn_finish(request: OfflineTurnRequest) -> OfflineTurnStatusResponse:
     cleanup_sessions()
@@ -1661,6 +1690,7 @@ async def room_start(request: RoomActionRequest) -> RoomStartResponse:
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
     room.state = ROOM_STATE_STARTED
+    room.round_id += 1
     room.players_order = players
     starter_user_id = random_choice(players)
     room.starter_user_id = starter_user_id
@@ -1747,6 +1777,7 @@ async def room_restart(request: RoomActionRequest) -> RoomRestartResponse:
     room.cards_by_user = cards_by_user
     room.resolved_random_mode = resolved_mode
     room.state = ROOM_STATE_STARTED
+    room.round_id += 1
     room.players_order = players
     room.starter_user_id = random_choice(players)
     room.current_turn_index = room.players_order.index(room.starter_user_id)
@@ -1802,6 +1833,7 @@ async def room_return_to_lobby(request: RoomActionRequest) -> RoomInfo:
     room.turn_state = TURN_STATE_WAITING
     room.turn_started_at = None
     room.turns_completed = False
+    room.round_id = 0
     room.last_status_message = None
     room.last_status_at = None
 
@@ -1846,6 +1878,46 @@ async def room_turn_start(request: RoomActionRequest) -> RoomInfo:
     if room.turn_started_at is None:
         room.turn_started_at = time.time()
 
+    return room_to_info(room, user_id, username)
+
+
+@app.post("/api/room/turn/skip", response_model=RoomInfo)
+async def room_turn_skip(request: RoomActionRequest) -> RoomInfo:
+    cleanup_sessions()
+    user = verify_init_data(request.initData)
+    user_id = int(user.get("id", 0))
+    username = normalize_tg_username(user.get("username"))
+
+    room_code = normalizeRoomCode(request.room_code)
+    room = rooms.get(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if user_id not in room.players:
+        raise HTTPException(status_code=403, detail="Not in room")
+    touch_room_user(room, user_id)
+    if drop_stale_room_players(room):
+        rooms.pop(room_code, None)
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.state != ROOM_STATE_STARTED:
+        raise HTTPException(status_code=400, detail="Game not started")
+    if room.turn_state != TURN_STATE_ACTIVE or not room.turn_active:
+        raise HTTPException(status_code=400, detail="Таймер не активен")
+    if not room.timer_enabled:
+        raise HTTPException(status_code=400, detail="Timer disabled")
+    if not normalize_room_turn_state(room):
+        raise HTTPException(status_code=400, detail="Timer disabled")
+
+    current_turn_user_id = current_room_turn_user_id(room)
+    is_owner = room.owner_user_id == user_id
+    is_current_turn_player = current_turn_user_id == user_id
+    if not (is_owner or is_current_turn_player):
+        raise HTTPException(status_code=403, detail="Only owner or current player can skip timer")
+
+    room.current_turn_index = (room.current_turn_index + 1) % len(room.players_order)
+    room.turn_started_at = time.time()
+    room.turn_active = True
+    room.turn_state = TURN_STATE_ACTIVE
+    room.turns_completed = False
     return room_to_info(room, user_id, username)
 
 
@@ -2029,6 +2101,16 @@ def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None
         if current_turn_entry:
             current_turn_name = str(current_turn_entry.get("display_name") or "")
     is_lobby_owner = room.state == ROOM_STATE_WAITING and room.owner_user_id == user_id
+    can_skip_timer = bool(
+        room.timer_enabled
+        and room.state == ROOM_STATE_STARTED
+        and room.turn_state == TURN_STATE_ACTIVE
+        and room.turn_active
+        and (
+            room.owner_user_id == user_id
+            or current_turn_user_id == user_id
+        )
+    )
     is_allowed_dev_admin = is_dev_admin(user_id, username)
     can_manage_bots_flag = bool(
         DEV_TOOLS_ENABLED
@@ -2079,6 +2161,8 @@ def room_to_info(room: RoomSession, user_id: int, username: Optional[str] = None
         current_turn_name=current_turn_name,
         turn_started_at=room.turn_started_at,
         turns_completed=room.turns_completed,
+        round_id=room.round_id,
+        can_skip_timer=can_skip_timer,
         status_message=room.last_status_message,
         can_manage_bots=can_manage_bots_flag,
     )
