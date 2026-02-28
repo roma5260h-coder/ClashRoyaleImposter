@@ -176,6 +176,7 @@ export default function App() {
   } | null>(null);
   const [offlineImageOk, setOfflineImageOk] = useState<boolean>(true);
   const [offlineCardImageLoaded, setOfflineCardImageLoaded] = useState<boolean>(false);
+  const [isOfflineRoleClosing, setIsOfflineRoleClosing] = useState<boolean>(false);
   const [starterPlayer, setStarterPlayer] = useState<number | null>(null);
   const [offlineTurn, setOfflineTurn] = useState<OfflineTurnStatus | null>(null);
 
@@ -338,6 +339,19 @@ export default function App() {
     }, TOAST_DURATION_MS);
   }, []);
 
+  const triggerCardActionHaptic = useCallback((kind: "open" | "close") => {
+    try {
+      if (!tg?.HapticFeedback) return;
+      if (kind === "open") {
+        tg.HapticFeedback.impactOccurred?.("light");
+        return;
+      }
+      tg.HapticFeedback.selectionChanged?.();
+    } catch {
+      // ignore haptic errors in unsupported clients
+    }
+  }, []);
+
   const clearRoomRoleCloseTimer = useCallback(() => {
     if (roomRoleCloseTimerRef.current !== null) {
       window.clearTimeout(roomRoleCloseTimerRef.current);
@@ -374,6 +388,11 @@ export default function App() {
     }, ROLE_MODAL_ANIM_MS);
   }, [clearRoomRoleCloseTimer, isRoomRoleAnimatingOut, isRoomRoleMounted]);
 
+  const handleCloseRoomRoleByButton = useCallback(() => {
+    triggerCardActionHaptic("close");
+    closeRoomRoleModal();
+  }, [closeRoomRoleModal, triggerCardActionHaptic]);
+
   const openRoomRoleModal = useCallback(
     (payload: RolePayload) => {
       clearRoomRoleOpenRaf();
@@ -403,6 +422,7 @@ export default function App() {
       offlineRoleImageRenderStartedAtRef.current = performance.now();
       setOfflineImageOk(true);
       setOfflineCardImageLoaded(isCardRole ? isCardImageLoaded : true);
+      setIsOfflineRoleClosing(false);
       setOfflineRole(payload);
       setScreen("offlineRole");
     },
@@ -1014,6 +1034,7 @@ export default function App() {
     setOfflineTimerEnabled(false);
     setOfflineDealVersion(0);
     setOfflineRole(null);
+    setIsOfflineRoleClosing(false);
     setStarterPlayer(null);
     setOfflineTurn(null);
     setRoomInfo(null);
@@ -1110,6 +1131,7 @@ export default function App() {
 
   const handleReveal = async () => {
     if (!offlineSessionId) return;
+    triggerCardActionHaptic("open");
     setError(null);
 
     try {
@@ -1149,11 +1171,19 @@ export default function App() {
   };
 
   const handleCloseRole = async () => {
-    if (!offlineSessionId) return;
+    if (!offlineSessionId || isOfflineRoleClosing) return;
+    triggerCardActionHaptic("close");
     setError(null);
+    setIsOfflineRoleClosing(true);
 
     try {
-      const res = await api.offlineClose(apiConfig, offlineSessionId);
+      const [res] = await Promise.all([
+        api.offlineClose(apiConfig, offlineSessionId),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, ROLE_MODAL_ANIM_MS);
+        }),
+      ]);
+      setIsOfflineRoleClosing(false);
       if (!res.finished) {
         if (res.current_player_number) {
           setCurrentPlayer(res.current_player_number);
@@ -1173,6 +1203,7 @@ export default function App() {
 
       setScreen("offlineFinished");
     } catch (err) {
+      setIsOfflineRoleClosing(false);
       setError(toUserError(err, "Не удалось продолжить"));
     }
   };
@@ -1518,6 +1549,7 @@ export default function App() {
 
   const handleGetRole = async () => {
     if (!roomInfo) return;
+    triggerCardActionHaptic("open");
     setError(null);
 
     try {
@@ -1994,7 +2026,7 @@ export default function App() {
                 <div className="title">Игрок {currentPlayer}</div>
                 <p className="text">Нажми кнопку, чтобы увидеть свою карту.</p>
                 <div className="actions">
-                  <button className="btn" onClick={handleReveal}>
+                  <button className="btn card-action-btn" onClick={handleReveal}>
                     Показать карту
                   </button>
                 </div>
@@ -2002,7 +2034,7 @@ export default function App() {
             )}
 
             {screen === "offlineRole" && offlineRole && (
-              <div className="card center">
+              <div className={`card center offline-role-card ${isOfflineRoleClosing ? "is-closing" : "is-opening"}`}>
                 <div className="title">Твоя роль</div>
                 {offlineRole.role === "spy" && (
                   <div className="card-image spy-frame">
@@ -2040,7 +2072,7 @@ export default function App() {
                 )}
                 <div className="role">{offlineRole.role === "spy" ? "Ты шпион" : `Карта: ${offlineRole.card}`}</div>
                 <div className="actions">
-                  <button className="btn" onClick={handleCloseRole}>
+                  <button className="btn card-action-btn" onClick={handleCloseRole}>
                     Закрыть
                   </button>
                 </div>
@@ -2253,7 +2285,7 @@ export default function App() {
                   <>
                     <div className="room-phase-title starter-highlight">Начинает: {starterDisplayName ?? "—"}</div>
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
+                      <button className="btn full card-action-btn" onClick={handleGetRole}>
                         Показать карту
                       </button>
                       {roomInfo.you_are_owner && (
@@ -2283,7 +2315,7 @@ export default function App() {
                     )}
 
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
+                      <button className="btn full card-action-btn" onClick={handleGetRole}>
                         Показать карту
                       </button>
                       {roomPhase === "playing" && roomInfo.timer_enabled && roomInfo.can_skip_timer && (
@@ -2335,7 +2367,7 @@ export default function App() {
                   <>
                     <div className="room-phase-title">Игра запущена</div>
                     <div className="actions stack">
-                      <button className="btn full" onClick={handleGetRole}>
+                      <button className="btn full card-action-btn" onClick={handleGetRole}>
                         Показать карту
                       </button>
                     </div>
@@ -2345,7 +2377,12 @@ export default function App() {
             )}
 
             {(screen === "roomGame" || screen === "room") && isRoomRoleMounted && roomRole && (
-              <div className={`role-modal-backdrop ${isRoomRoleOpen ? "is-open" : ""}`} onClick={closeRoomRoleModal}>
+              <div
+                className={`role-modal-backdrop ${isRoomRoleOpen ? "is-open" : ""} ${
+                  isRoomRoleAnimatingOut ? "is-closing" : ""
+                }`}
+                onClick={closeRoomRoleModal}
+              >
                 <div className="card role-modal-card" onClick={(event) => event.stopPropagation()}>
                   <div className="title">Твоя роль</div>
                   {roomRole.role === "spy" && (
@@ -2384,7 +2421,7 @@ export default function App() {
                   )}
                   <div className="role">{roomRole.role === "spy" ? "Ты шпион" : `Карта: ${roomRole.card}`}</div>
                   <div className="actions">
-                    <button className="btn" onClick={closeRoomRoleModal}>
+                    <button className="btn card-action-btn" onClick={handleCloseRoomRoleByButton}>
                       Закрыть
                     </button>
                   </div>

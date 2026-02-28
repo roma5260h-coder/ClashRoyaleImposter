@@ -351,6 +351,15 @@ body {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
+.btn.card-action-btn {
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+}
+
+.btn.card-action-btn:active {
+  transform: scale(0.97);
+  filter: brightness(0.97);
+}
+
 .btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 20px rgba(255, 209, 102, 0.3);
@@ -991,13 +1000,56 @@ body {
   max-height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   overflow-y: auto;
   opacity: 0;
-  transform: translateY(12px) scale(0.97);
-  transition: opacity 220ms ease, transform 220ms ease;
+  transform: perspective(900px) rotateY(-9deg) translateY(16px) scale(0.965);
+  transform-origin: center 60%;
+  backface-visibility: hidden;
+  will-change: transform, opacity;
 }
 
 .role-modal-backdrop.is-open .role-modal-card {
-  opacity: 1;
-  transform: translateY(0) scale(1);
+  animation: role-card-open 220ms cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+.role-modal-backdrop.is-closing .role-modal-card {
+  animation: role-card-close 220ms cubic-bezier(0.4, 0.1, 0.8, 0.4) forwards;
+}
+
+.offline-role-card {
+  opacity: 0;
+  transform: perspective(900px) rotateY(-9deg) translateY(16px) scale(0.965);
+  transform-origin: center 60%;
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+}
+
+.offline-role-card.is-opening {
+  animation: role-card-open 220ms cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+.offline-role-card.is-closing {
+  animation: role-card-close 220ms cubic-bezier(0.4, 0.1, 0.8, 0.4) forwards;
+}
+
+@keyframes role-card-open {
+  0% {
+    opacity: 0;
+    transform: perspective(900px) rotateY(-9deg) translateY(16px) scale(0.965);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(900px) rotateY(0deg) translateY(0) scale(1);
+  }
+}
+
+@keyframes role-card-close {
+  0% {
+    opacity: 1;
+    transform: perspective(900px) rotateY(0deg) translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: perspective(900px) rotateY(8deg) translateY(14px) scale(0.965);
+  }
 }
 
 
@@ -1090,5 +1142,32 @@ body {
 
   .homeText {
     font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role-modal-backdrop {
+    transition: none;
+  }
+
+  .role-modal-card,
+  .role-modal-backdrop.is-open .role-modal-card,
+  .role-modal-backdrop.is-closing .role-modal-card,
+  .offline-role-card,
+  .offline-role-card.is-opening,
+  .offline-role-card.is-closing {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+    will-change: auto;
+  }
+
+  .btn.card-action-btn {
+    transition: none;
+  }
+
+  .btn.card-action-btn:active {
+    transform: none;
+    filter: none;
   }
 }
