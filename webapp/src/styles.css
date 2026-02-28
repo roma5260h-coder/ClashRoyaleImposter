@@ -1010,7 +1010,7 @@ body {
 }
 
 .role-visual.is-opening {
-  animation: role-visual-open 220ms cubic-bezier(0.18, 0.85, 0.25, 1) forwards;
+  animation: role-visual-open 360ms cubic-bezier(0.18, 0.85, 0.25, 1) forwards;
 }
 
 .role-visual.is-closing {
@@ -1018,7 +1018,7 @@ body {
 }
 
 .role-modal-backdrop.is-open .role-visual {
-  animation: role-visual-open 220ms cubic-bezier(0.18, 0.85, 0.25, 1) forwards;
+  animation: role-visual-open 360ms cubic-bezier(0.18, 0.85, 0.25, 1) forwards;
 }
 
 .role-modal-backdrop.is-closing .role-visual {
