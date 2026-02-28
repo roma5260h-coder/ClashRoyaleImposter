@@ -117,6 +117,14 @@ const IconRandom = () => (
   </svg>
 );
 
+const IconSkipTimer = () => (
+  <svg viewBox="0 0 24 24" fill="none">
+    <path d="M4.7 6.5 10.3 12l-5.6 5.5" />
+    <path d="M10.7 6.5 16.3 12l-5.6 5.5" />
+    <path d="M19 6.6v10.8" />
+  </svg>
+);
+
 function toUserError(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) {
     return err.message;
@@ -158,6 +166,7 @@ export default function App() {
   const [pendingOfflineCount, setPendingOfflineCount] = useState<number | null>(null);
   const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
   const [offlineTimerEnabled, setOfflineTimerEnabled] = useState<boolean>(false);
+  const [offlineDealVersion, setOfflineDealVersion] = useState<number>(0);
   const [currentPlayer, setCurrentPlayer] = useState<number>(1);
   const [offlineRole, setOfflineRole] = useState<{
     role: string;
@@ -420,8 +429,8 @@ export default function App() {
   );
 
   const prefetchOfflineRole = useCallback(
-    async (sessionId: string, playerNumber: number) => {
-      const key = `${sessionId}:${playerNumber}`;
+    async (sessionId: string, playerNumber: number, dealVersion: number) => {
+      const key = `${sessionId}:${dealVersion}:${playerNumber}`;
       if (offlinePrefetchRef.current.has(key)) return;
       const inFlight = offlinePrefetchInFlightRef.current.get(key);
       if (inFlight) {
@@ -838,8 +847,8 @@ export default function App() {
 
   useEffect(() => {
     if (screen !== "offlinePlayer" || !offlineSessionId) return;
-    void prefetchOfflineRole(offlineSessionId, currentPlayer);
-  }, [currentPlayer, offlineSessionId, prefetchOfflineRole, screen]);
+    void prefetchOfflineRole(offlineSessionId, currentPlayer, offlineDealVersion);
+  }, [currentPlayer, offlineDealVersion, offlineSessionId, prefetchOfflineRole, screen]);
 
   useEffect(() => {
     clearRoomPrefetchCache();
@@ -1006,6 +1015,7 @@ export default function App() {
     setPendingOfflineCount(null);
     setOfflineSessionId(null);
     setOfflineTimerEnabled(false);
+    setOfflineDealVersion(0);
     setOfflineRole(null);
     setStarterPlayer(null);
     setOfflineTurn(null);
@@ -1079,6 +1089,7 @@ export default function App() {
   const handleStartOffline = async () => {
     if (!gameMode || !pendingOfflineCount) return;
     setError(null);
+    clearOfflinePrefetchCache();
 
     try {
       const res = await api.offlineStart(
@@ -1091,6 +1102,7 @@ export default function App() {
       );
       setOfflineSessionId(res.session_id);
       setOfflineTimerEnabled(res.timer_enabled);
+      setOfflineDealVersion((prev) => prev + 1);
       setCurrentPlayer(res.current_player_number);
       setOfflineTurn(null);
       setScreen("offlinePlayer");
@@ -1104,7 +1116,7 @@ export default function App() {
     setError(null);
 
     try {
-      const key = `${offlineSessionId}:${currentPlayer}`;
+      const key = `${offlineSessionId}:${offlineDealVersion}:${currentPlayer}`;
       const prefetched = offlinePrefetchRef.current.get(key);
       if (prefetched) {
         applyOfflineRolePayload(prefetched.payload, prefetched.preloadedImage);
@@ -1214,11 +1226,13 @@ export default function App() {
     if (!offlineSessionId) return;
     setError(null);
     setStatus("Новая игра начинается…");
+    clearOfflinePrefetchCache();
 
     try {
       const res = await api.offlineRestart(apiConfig, offlineSessionId);
       setOfflineSessionId(res.session_id);
       setOfflineTimerEnabled(res.timer_enabled);
+      setOfflineDealVersion((prev) => prev + 1);
       setCurrentPlayer(res.current_player_number);
       setOfflineRole(null);
       setStarterPlayer(null);
@@ -2045,10 +2059,13 @@ export default function App() {
                     <p className="text">Переход к следующему игроку происходит автоматически по таймеру.</p>
                     {renderTurnProgress()}
                     <div className="actions">
-                      <button className="btn skip-timer" onClick={handleSkipOfflineTurn}>
-                        ⏭ Пропустить таймер
+                      <button className="btn skip-timer with-icon" onClick={handleSkipOfflineTurn}>
+                        <span className="btn-icon" aria-hidden="true">
+                          <IconSkipTimer />
+                        </span>
+                        <span>Пропустить таймер</span>
                       </button>
-                      <button className="btn secondary" onClick={handleFinishOfflineTurn}>
+                      <button className="btn danger-ghost" onClick={handleFinishOfflineTurn}>
                         Игра окончена
                       </button>
                     </div>
@@ -2232,8 +2249,11 @@ export default function App() {
                         Показать карту
                       </button>
                       {roomPhase === "playing" && roomInfo.timer_enabled && roomInfo.can_skip_timer && (
-                        <button className="btn skip-timer full" onClick={handleSkipRoomTurn}>
-                          ⏭ Пропустить таймер
+                        <button className="btn skip-timer with-icon full" onClick={handleSkipRoomTurn}>
+                          <span className="btn-icon" aria-hidden="true">
+                            <IconSkipTimer />
+                          </span>
+                          <span>Пропустить таймер</span>
                         </button>
                       )}
 
@@ -2244,7 +2264,7 @@ export default function App() {
                       )}
 
                       {roomInfo.you_are_owner && roomPhase === "playing" && (
-                        <button className="btn secondary full" onClick={handleFinishRoomTurn}>
+                        <button className="btn danger-ghost full" onClick={handleFinishRoomTurn}>
                           Игра окончена
                         </button>
                       )}

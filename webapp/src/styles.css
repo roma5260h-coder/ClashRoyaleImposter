@@ -315,8 +315,19 @@ body {
 }
 
 .btn.skip-timer {
-  background: linear-gradient(90deg, #7bdff2 0%, #5ecde4 100%);
-  color: #0d1222;
+  background: linear-gradient(90deg, #a8d86b 0%, #84bf4a 100%);
+  color: #10210f;
+}
+
+.btn.danger-ghost {
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  backdrop-filter: blur(16px);
+  color: var(--danger);
+}
+
+.btn.danger-ghost:hover {
+  box-shadow: 0 8px 20px rgba(255, 107, 107, 0.22);
 }
 
 .btn.small {
