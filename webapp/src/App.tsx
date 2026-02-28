@@ -1654,6 +1654,33 @@ export default function App() {
 
   const isHome = screen === "format";
 
+  useEffect(() => {
+    if (!isHome) return;
+    const timeouts: number[] = [];
+
+    if (error) {
+      const errorToClear = error;
+      timeouts.push(
+        window.setTimeout(() => {
+          setError((prev) => (prev === errorToClear ? null : prev));
+        }, 5000)
+      );
+    }
+
+    if (status) {
+      const statusToClear = status;
+      timeouts.push(
+        window.setTimeout(() => {
+          setStatus((prev) => (prev === statusToClear ? null : prev));
+        }, 5000)
+      );
+    }
+
+    return () => {
+      timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, [isHome, error, status]);
+
   return (
     <div className="app">
       <div className="app-bg-placeholder" />
@@ -1682,8 +1709,8 @@ export default function App() {
 
             {(error || status) && (
               <div className="home-notices">
-                {error && <div className="error">{error}</div>}
-                {status && <div className="hint status">{status}</div>}
+                {error && <div className="error home-notice-banner">{error}</div>}
+                {status && <div className="hint status home-notice-banner">{status}</div>}
               </div>
             )}
 
