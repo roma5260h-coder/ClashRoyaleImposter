@@ -1004,9 +1004,6 @@ export default function App() {
     return "fallback";
   }, [roomInfo]);
   const roomCurrentTurnName = roomInfo?.current_turn_name ?? `Игрок ${(roomInfo?.current_turn_index ?? 0) + 1}`;
-  const roomPlayingTitle = roomInfo?.timer_enabled
-    ? `Сейчас ход: ${roomCurrentTurnName}`
-    : `Начинает: ${starterDisplayName ?? roomCurrentTurnName}`;
 
   const clearSessionData = () => {
     leaveSentRef.current = false;
@@ -1683,8 +1680,12 @@ export default function App() {
               )}
             </div>
 
-            {error && <div className="error">{error}</div>}
-            {status && <div className="hint status">{status}</div>}
+            {(error || status) && (
+              <div className="home-notices">
+                {error && <div className="error">{error}</div>}
+                {status && <div className="hint status">{status}</div>}
+              </div>
+            )}
 
             <div className="homeActions">
               <div className="homeText">
@@ -2241,7 +2242,13 @@ export default function App() {
 
                 {(roomPhase === "playing" || roomPhase === "paused") && (
                   <>
-                    <div className={`room-phase-title ${!roomInfo.timer_enabled ? "starter-highlight" : ""}`}>{roomPlayingTitle}</div>
+                    {roomInfo.timer_enabled ? (
+                      <div className="room-phase-title">
+                        Сейчас ход: <span className="current-turn-name is-active-turn">{roomCurrentTurnName}</span>
+                      </div>
+                    ) : (
+                      <div className="room-phase-title starter-highlight">Начинает: {starterDisplayName ?? roomCurrentTurnName}</div>
+                    )}
                     {roomInfo.timer_enabled && renderTurnProgress()}
                     {roomInfo.state === "paused" && (
                       <div className="hint danger">Игра на паузе. Таймер остановлен.</div>
