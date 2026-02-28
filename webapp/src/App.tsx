@@ -1653,6 +1653,7 @@ export default function App() {
   );
 
   const isHome = screen === "format";
+  const HOME_NOTICE_LIFETIME_MS = 5600;
 
   useEffect(() => {
     if (!isHome) return;
@@ -1663,7 +1664,7 @@ export default function App() {
       timeouts.push(
         window.setTimeout(() => {
           setError((prev) => (prev === errorToClear ? null : prev));
-        }, 5000)
+        }, HOME_NOTICE_LIFETIME_MS)
       );
     }
 
@@ -1672,14 +1673,14 @@ export default function App() {
       timeouts.push(
         window.setTimeout(() => {
           setStatus((prev) => (prev === statusToClear ? null : prev));
-        }, 5000)
+        }, HOME_NOTICE_LIFETIME_MS)
       );
     }
 
     return () => {
       timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
     };
-  }, [isHome, error, status]);
+  }, [HOME_NOTICE_LIFETIME_MS, isHome, error, status]);
 
   return (
     <div className="app">
