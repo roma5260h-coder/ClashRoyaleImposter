@@ -1327,6 +1327,7 @@ export default function App() {
     screen === "roomCreateRandomSettings" ||
     screen === "offlinePlayers" ||
     screen === "joinRoom";
+  const showOfflineExitTopButton = screen === "offlinePlayer" || screen === "offlineRole" || screen === "offlineNext";
 
   const handleTopBack = () => {
     if (screen === "playMode") {
@@ -1463,6 +1464,11 @@ export default function App() {
                 </button>
               )}
             </header>
+            {showOfflineExitTopButton && (
+              <button className="top-exit-btn" onClick={handleExitOfflineFlow}>
+                Выйти из игры
+              </button>
+            )}
 
             {toasts.length > 0 && (
               <div className="toast-stack" role="status" aria-live="polite">
@@ -1705,9 +1711,6 @@ export default function App() {
                     Показать карту
                   </button>
                 </div>
-                <button className="leave-link" onClick={handleExitOfflineFlow}>
-                  Выйти из игры
-                </button>
               </div>
             )}
 
@@ -1754,9 +1757,6 @@ export default function App() {
                     Закрыть
                   </button>
                 </div>
-                <button className="leave-link" onClick={handleExitOfflineFlow}>
-                  Выйти из игры
-                </button>
               </div>
             )}
 
@@ -1769,9 +1769,6 @@ export default function App() {
                     Продолжить
                   </button>
                 </div>
-                <button className="leave-link" onClick={handleExitOfflineFlow}>
-                  Выйти из игры
-                </button>
               </div>
             )}
 

@@ -135,6 +135,26 @@ body {
   filter: brightness(1.05);
 }
 
+.top-exit-btn {
+  align-self: flex-start;
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  backdrop-filter: blur(16px);
+  color: var(--danger);
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 14px;
+  min-height: 42px;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: -2px;
+}
+
+.top-exit-btn:hover {
+  filter: brightness(1.05);
+}
+
 .subtitle {
   color: var(--muted);
   font-size: 14px;
