@@ -2034,15 +2034,15 @@ export default function App() {
             )}
 
             {screen === "offlineRole" && offlineRole && (
-              <div className={`card center offline-role-card ${isOfflineRoleClosing ? "is-closing" : "is-opening"}`}>
+              <div className="card center">
                 <div className="title">Твоя роль</div>
                 {offlineRole.role === "spy" && (
-                  <div className="card-image spy-frame">
+                  <div className={`card-image spy-frame role-visual ${isOfflineRoleClosing ? "is-closing" : "is-opening"}`}>
                     <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
                   </div>
                 )}
                 {offlineRole.role === "card" && offlineRole.image_url && offlineImageOk && (
-                  <div className="card-image-wrapper">
+                  <div className={`card-image-wrapper role-visual ${isOfflineRoleClosing ? "is-closing" : "is-opening"}`}>
                     {!offlineCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
                     <img
                       className={`card-image ${offlineCardImageLoaded ? "is-loaded" : "is-loading"}`}
@@ -2386,12 +2386,12 @@ export default function App() {
                 <div className="card role-modal-card" onClick={(event) => event.stopPropagation()}>
                   <div className="title">Твоя роль</div>
                   {roomRole.role === "spy" && (
-                    <div className="card-image spy-frame">
+                    <div className="card-image spy-frame role-visual">
                       <img className="spy-art" src={SPY_IMAGE_URL} alt="Шпион" />
                     </div>
                   )}
                   {roomRole.role === "card" && roomRole.image_url && roomImageOk && (
-                    <div className="card-image-wrapper">
+                    <div className="card-image-wrapper role-visual">
                       {!roomCardImageLoaded && <div className="card-image-placeholder" aria-hidden />}
                       <img
                         className={`card-image ${roomCardImageLoaded ? "is-loaded" : "is-loading"}`}
