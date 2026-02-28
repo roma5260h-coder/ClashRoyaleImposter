@@ -86,7 +86,7 @@ def deal_roles(
     if game_mode == GameMode.STANDARD.value:
         spy = _rng.choice(player_list)
         card = _rng.choice(ALL_CARDS)
-        cards_for_players = {
+        cards_for_players: Dict[T, Optional[str]] = {
             p: (None if p == spy else card) for p in player_list
         }
         return [spy], cards_for_players, None
@@ -96,37 +96,37 @@ def deal_roles(
     if scenario == RandomScenario.STANDARD:
         spy = _rng.choice(player_list)
         card = _rng.choice(ALL_CARDS)
-        cards_for_players = {
+        cards_for_players: Dict[T, Optional[str]] = {
             p: (None if p == spy else card) for p in player_list
         }
         return [spy], cards_for_players, scenario.value
 
     if scenario == RandomScenario.ALL_SPIES:
-        cards_for_players = {p: None for p in player_list}
+        cards_for_players: Dict[T, Optional[str]] = {p: None for p in player_list}
         return list(player_list), cards_for_players, scenario.value
 
     if scenario == RandomScenario.SAME_CARD:
         card = _rng.choice(ALL_CARDS)
-        cards_for_players = {p: card for p in player_list}
+        cards_for_players: Dict[T, Optional[str]] = {p: card for p in player_list}
         return [], cards_for_players, scenario.value
 
     if scenario == RandomScenario.ONE_OUTLIER_CARD:
         base_card = _rng.choice(ALL_CARDS)
         outlier_card = _random_distinct_card(base_card)
         outlier_player = _rng.choice(player_list)
-        cards_for_players = {
+        cards_for_players: Dict[T, Optional[str]] = {
             p: (outlier_card if p == outlier_player else base_card) for p in player_list
         }
         return [], cards_for_players, scenario.value
 
     if scenario == RandomScenario.DIFFERENT_CARDS:
-        cards_for_players = {p: _rng.choice(ALL_CARDS) for p in player_list}
+        cards_for_players: Dict[T, Optional[str]] = {p: _rng.choice(ALL_CARDS) for p in player_list}
         return [], cards_for_players, scenario.value
 
     spy_count = multiple_spies_count(len(player_list))
     spies = _rng.sample(player_list, spy_count)
     card = _rng.choice(ALL_CARDS)
-    cards_for_players = {
+    cards_for_players: Dict[T, Optional[str]] = {
         p: (None if p in spies else card) for p in player_list
     }
     return spies, cards_for_players, scenario.value

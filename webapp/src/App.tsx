@@ -1580,6 +1580,7 @@ export default function App() {
     screen === "offlinePlayers" ||
     screen === "joinRoom";
   const showOfflineExitTopButton = screen === "offlinePlayer" || screen === "offlineRole" || screen === "offlineNext";
+  const showOnlineExitTopButton = (screen === "room" || screen === "roomGame") && !!roomInfo;
 
   const handleTopBack = () => {
     if (screen === "playMode") {
@@ -1718,6 +1719,11 @@ export default function App() {
             </header>
             {showOfflineExitTopButton && (
               <button className="top-exit-btn" onClick={handleExitOfflineFlow}>
+                ← Выйти
+              </button>
+            )}
+            {showOnlineExitTopButton && (
+              <button className="top-exit-btn" onClick={handleLeaveRoom}>
                 ← Выйти
               </button>
             )}
@@ -2156,9 +2162,6 @@ export default function App() {
                     ⋯
                   </button>
                 )}
-                <button className="leave-link" onClick={handleLeaveRoom}>
-                  Выйти из комнаты
-                </button>
               </div>
             )}
 
@@ -2264,15 +2267,12 @@ export default function App() {
                       )}
 
                       {roomInfo.you_are_owner && roomPhase === "playing" && (
-                        <button className="btn danger-ghost full" onClick={handleFinishRoomTurn}>
+                        <button className="btn danger-ghost full finish-turn-btn" onClick={handleFinishRoomTurn}>
                           Игра окончена
                         </button>
                       )}
                     </div>
 
-                    <button className="leave-link" onClick={handleLeaveRoom}>
-                      {roomInfo.you_are_owner ? "Выйти из лобби" : "Выйти из комнаты"}
-                    </button>
                   </>
                 )}
 
@@ -2291,9 +2291,6 @@ export default function App() {
                     ) : (
                       <>
                         <div className="hint">Ожидаем действий хоста</div>
-                        <button className="leave-link" onClick={handleLeaveRoom}>
-                          Выйти из комнаты
-                        </button>
                       </>
                     )}
                   </>
@@ -2307,9 +2304,6 @@ export default function App() {
                         Показать карту
                       </button>
                     </div>
-                    <button className="leave-link" onClick={handleLeaveRoom}>
-                      {roomInfo.you_are_owner ? "Выйти из лобби" : "Выйти из комнаты"}
-                    </button>
                   </>
                 )}
               </div>

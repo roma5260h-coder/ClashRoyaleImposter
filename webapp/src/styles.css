@@ -315,8 +315,21 @@ body {
 }
 
 .btn.skip-timer {
-  background: linear-gradient(90deg, #a8d86b 0%, #84bf4a 100%);
-  color: #10210f;
+  background: linear-gradient(90deg, #7caa48 0%, #5f8f31 100%);
+  color: #0d1a0b;
+  border: 1px solid rgba(30, 56, 22, 0.42);
+}
+
+.btn.skip-timer:hover {
+  background: linear-gradient(90deg, #7caa48 0%, #5f8f31 100%);
+  color: #0d1a0b;
+  box-shadow: 0 8px 18px rgba(60, 95, 35, 0.26);
+}
+
+.btn.skip-timer:active,
+.btn.skip-timer:focus-visible {
+  background: linear-gradient(90deg, #7caa48 0%, #5f8f31 100%);
+  color: #0d1a0b;
 }
 
 .btn.danger-ghost {
@@ -328,6 +341,10 @@ body {
 
 .btn.danger-ghost:hover {
   box-shadow: 0 8px 20px rgba(255, 107, 107, 0.22);
+}
+
+.finish-turn-btn {
+  margin-top: 8px;
 }
 
 .btn.small {
